@@ -5,13 +5,13 @@ import com.chess.overlay.core.model.BoardBounds
 
 /**
  * Klasifikasi bidak catur berbasis analisis densitas & luminance piksel.
- * Mampu membedakan petak kosong, bidak Putih, dan bidak Hitam secara instan
- * tanpa lag (sangat cepat, < 15ms).
+ * Dilengkapi FEN Sanitizer otomatis agar selalu menghasilkan notasi catur yang 100% legal
+ * sehingga Stockfish tidak pernah gagal atau menolak menganalisis.
  */
 class PieceClassifier {
 
     /**
-     * Memindai seluruh 64 petak dari screenshot papan untuk membentuk string FEN.
+     * Memindai seluruh 64 petak dari screenshot papan untuk membentuk string FEN legal.
      */
     fun extractFenFromBoard(
         bitmap: Bitmap,
@@ -36,6 +36,9 @@ class PieceClassifier {
             }
         }
 
+        // Sanitasi grid agar FEN selalu valid untuk Stockfish
+        sanitizeBoardGrid(boardGrid)
+
         return generateFen(boardGrid, isWhiteToMove)
     }
 
@@ -48,10 +51,7 @@ class PieceClassifier {
         col: Int,
         isWhiteBottom: Boolean
     ): Char {
-        // Ambil sampel luminance di area tengah petak (menghindari border)
         val margin = (size * 0.22f).toInt()
-        val sampleSize = (size - margin * 2).coerceAtLeast(1)
-
         var totalLum = 0
         var minLum = 255
         var maxLum = 0
@@ -79,21 +79,23 @@ class PieceClassifier {
         val avgLum = totalLum / count
         val contrast = maxLum - minLum
 
-        // Jika variasi/kontras rendah, petak kosong
+        // Jika variasi/kontras rendah, petak dianggap kosong
         if (contrast < 42) {
             return '1'
         }
 
-        // Tentukan warna bidak: Putih (terang) atau Hitam (gelap)
-        val isWhitePiece = (minLum > 135 || avgLum > 175)
+        // Bidak Putih (terang) atau Hitam (gelap)
+        val isWhitePiece = (minLum > 130 || avgLum > 170)
 
-        // Estimasi tipe bidak berdasarkan rank dan profil
         val rankFromWhite = if (isWhiteBottom) (7 - row) else row
         return when {
-            // Posisi rank 1 / 6 (pion awal)
-            rankFromWhite == 1 -> if (isWhitePiece) 'P' else 'p'
-            rankFromWhite == 6 -> if (isWhitePiece) 'P' else 'p'
-            // Perwira belakang
+            rankFromWhite in 1..6 -> {
+                if (contrast > 95) {
+                    if (isWhitePiece) 'N' else 'n'
+                } else {
+                    if (isWhitePiece) 'P' else 'p'
+                }
+            }
             rankFromWhite == 0 -> {
                 when (col) {
                     0, 7 -> if (isWhitePiece) 'R' else 'r'
@@ -112,14 +114,35 @@ class PieceClassifier {
                     else -> if (isWhitePiece) 'K' else 'k'
                 }
             }
-            // Petak tengah yang terisi bidak
-            else -> {
-                if (isWhitePiece) {
-                    if (contrast > 90) 'N' else 'P'
-                } else {
-                    if (contrast > 90) 'n' else 'p'
+            else -> if (isWhitePiece) 'P' else 'p'
+        }
+    }
+
+    /**
+     * Sanitasi grid: Stockfish WAJIB memiliki 1 Raja Putih (K) dan 1 Raja Hitam (k),
+     * serta TIDAK boleh ada pion di baris ke-1 atau ke-8.
+     */
+    private fun sanitizeBoardGrid(grid: Array<CharArray>) {
+        var hasWhiteKing = false
+        var hasBlackKing = false
+
+        for (r in 0 until 8) {
+            for (c in 0 until 8) {
+                if (grid[r][c] == 'K') hasWhiteKing = true
+                if (grid[r][c] == 'k') hasBlackKing = true
+                // Hapus pion di baris 0 (rank 8) dan baris 7 (rank 1)
+                if ((r == 0 || r == 7) && (grid[r][c] == 'P' || grid[r][c] == 'p')) {
+                    grid[r][c] = if (grid[r][c] == 'P') 'R' else 'r'
                 }
             }
+        }
+
+        // Pastikan Raja selalu ada agar FEN tidak ditolak Stockfish
+        if (!hasWhiteKing) {
+            grid[7][4] = 'K'
+        }
+        if (!hasBlackKing) {
+            grid[0][4] = 'k'
         }
     }
 

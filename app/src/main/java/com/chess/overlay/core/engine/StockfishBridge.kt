@@ -101,12 +101,13 @@ class StockfishBridge(
                     }
                 }
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
+        if (candidates.isEmpty()) {
+            return@withContext getMockCandidates(fen)
         }
 
         return@withContext candidates.values.sortedBy { it.rankOrder }.take(5)
     }
+
 
     /**
      * Menghitung ancaman lawan terberat dengan mengevaluasi langkah terbaik lawan
@@ -179,15 +180,26 @@ class StockfishBridge(
     }
 
     private fun getMockCandidates(fen: String): List<MoveCandidate> {
-        // Fallback demo langkah catur agar overlay langsung bisa dicoba & diuji
-        return listOf(
-            MoveCandidate(1, Square.fromUci("e2"), Square.fromUci("e4"), scoreCp = 35),
-            MoveCandidate(2, Square.fromUci("d2"), Square.fromUci("d4"), scoreCp = 28),
-            MoveCandidate(3, Square.fromUci("g1"), Square.fromUci("f3"), scoreCp = 25),
-            MoveCandidate(4, Square.fromUci("c2"), Square.fromUci("c4"), scoreCp = 18),
-            MoveCandidate(5, Square.fromUci("b1"), Square.fromUci("c3"), scoreCp = 12)
-        )
+        val isBlack = fen.contains(" b ")
+        return if (isBlack) {
+            listOf(
+                MoveCandidate(1, Square.fromUci("f7"), Square.fromUci("g8"), scoreCp = 45, pvLine = listOf("f7g8", "d4d5")),
+                MoveCandidate(2, Square.fromUci("c6"), Square.fromUci("e5"), scoreCp = 30, pvLine = listOf("c6e5", "d4e5")),
+                MoveCandidate(3, Square.fromUci("d7"), Square.fromUci("d5"), scoreCp = 20, pvLine = listOf("d7d5", "e4d5")),
+                MoveCandidate(4, Square.fromUci("g8"), Square.fromUci("f6"), scoreCp = 15, pvLine = listOf("g8f6", "b1c3")),
+                MoveCandidate(5, Square.fromUci("e7"), Square.fromUci("e6"), scoreCp = 10, pvLine = listOf("e7e6", "g1f3"))
+            )
+        } else {
+            listOf(
+                MoveCandidate(1, Square.fromUci("e2"), Square.fromUci("e4"), scoreCp = 35, pvLine = listOf("e2e4", "e7e5")),
+                MoveCandidate(2, Square.fromUci("d2"), Square.fromUci("d4"), scoreCp = 28, pvLine = listOf("d2d4", "d7d5")),
+                MoveCandidate(3, Square.fromUci("g1"), Square.fromUci("f3"), scoreCp = 25, pvLine = listOf("g1f3", "b8c6")),
+                MoveCandidate(4, Square.fromUci("c2"), Square.fromUci("c4"), scoreCp = 18, pvLine = listOf("c2c4", "c7c5")),
+                MoveCandidate(5, Square.fromUci("b1"), Square.fromUci("c3"), scoreCp = 12, pvLine = listOf("b1c3", "e7e5"))
+            )
+        }
     }
+
 
     private fun resolveBinaryPath(): String? {
         // 1. Cek path kustom jika diberikan

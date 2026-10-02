@@ -101,12 +101,17 @@ class StockfishBridge(
                     }
                 }
             }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
         if (candidates.isEmpty()) {
             return@withContext getMockCandidates(fen)
         }
 
         return@withContext candidates.values.sortedBy { it.rankOrder }.take(5)
     }
+
 
 
     /**

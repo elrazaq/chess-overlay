@@ -69,4 +69,18 @@ data class BoardBounds(
         val y = top + (displayRank + 0.5f) * squareSize
         return Pair(x, y)
     }
+
+    /**
+     * Mengonversi koordinat sentuhan pixel layar ke petak catur (Square)
+     */
+    fun getSquareFromPixel(x: Float, y: Float): Square? {
+        if (x < left || x > (left + size) || y < top || y > (top + size)) return null
+        val col = ((x - left) / squareSize).toInt().coerceIn(0, 7)
+        val row = ((y - top) / squareSize).toInt().coerceIn(0, 7)
+
+        val file = if (isWhiteBottom) col else (7 - col)
+        val rank = if (isWhiteBottom) (7 - row) else row
+        return Square(file, rank)
+    }
 }
+

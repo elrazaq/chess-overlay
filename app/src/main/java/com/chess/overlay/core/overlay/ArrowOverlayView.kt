@@ -3,19 +3,21 @@ package com.chess.overlay.core.overlay
 import android.content.Context
 import android.graphics.*
 import android.util.AttributeSet
+import android.view.MotionEvent
 import android.view.View
 import com.chess.overlay.core.model.BoardBounds
+import com.chess.overlay.core.model.BoardState
 import com.chess.overlay.core.model.MoveCandidate
+import com.chess.overlay.core.model.Square
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * Custom View performa tinggi untuk menggambar panah langkah catur persis seperti
- * engine analysis Chess.com / Lichess:
- * - Panah warna Cyan semi-transparan yang bersih & elegan.
- * - Tanpa teks menumpuk di atas bidak agar papan tetap terlihat jelas.
- * - Ujung kepala panah presisi tepat di tengah petak tujuan.
+ * Custom View untuk:
+ * 1. Menggambar panah rekomendasi Stockfish (Cyan elegan seperti di Chess.com/Lichess).
+ * 2. Menampilkan grid kalibrasi transparan saat memetakan posisi papan.
+ * 3. Menghighlight petak yang dipilih saat menggerakkan anak catur secara manual.
  */
 class ArrowOverlayView @JvmOverloads constructor(
     context: Context,
@@ -23,45 +25,51 @@ class ArrowOverlayView @JvmOverloads constructor(
     defStyleAttr: Int = 0
 ) : View(context, attrs, defStyleAttr) {
 
-    private var boardBounds: BoardBounds? = null
+    var boardBounds: BoardBounds? = null
+    var boardState: BoardState? = null
     private var candidates: List<MoveCandidate> = emptyList()
     private var threats: List<MoveCandidate> = emptyList()
-    var showOnlyBestMove: Boolean = true
 
-    // Paint untuk badan panah utama (Cyan semi-transparan seperti Lichess/Chess.com)
+    // Mode flags
+    var isMappingMode: Boolean = false
+    var isInputMoveMode: Boolean = false
+    var selectedSquare: Square? = null
+
+    // Callback saat petak catur disentuh dalam mode manual input
+    var onSquareTapped: ((Square) -> Unit)? = null
+
+    // Paints
     private val bestMovePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
-        color = Color.argb(215, 56, 189, 248) // #38BDF8 dengan 85% opacity
+        color = Color.argb(225, 56, 189, 248) // Cyan #38BDF8
     }
 
     private val bestMoveHeadPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL_AND_STROKE
-        color = Color.argb(215, 56, 189, 248)
+        color = Color.argb(225, 56, 189, 248)
     }
 
-    // Paint untuk alternatif #2 - #5 (lebih tipis dan sedikit transparan)
-    private val candidatePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val gridBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeCap = Paint.Cap.ROUND
-        strokeJoin = Paint.Join.ROUND
+        color = Color.argb(200, 34, 197, 94) // Green
+        strokeWidth = 4f
     }
 
-    private val candidateHeadPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.FILL_AND_STROKE
-    }
-
-    // Paint untuk ancaman lawan (Merah semi-transparan)
-    private val threatPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val gridLinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeCap = Paint.Cap.ROUND
-        color = Color.argb(200, 239, 68, 68)
+        color = Color.argb(120, 34, 197, 94)
+        strokeWidth = 2f
     }
 
-    private val threatHeadPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.FILL_AND_STROKE
-        color = Color.argb(200, 239, 68, 68)
+    private val highlightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.argb(120, 250, 204, 21) // Amber #FACC15
+    }
+
+    private val pieceIndicatorPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
     }
 
     private val arrowPath = Path()
@@ -80,35 +88,44 @@ class ArrowOverlayView @JvmOverloads constructor(
     fun clearOverlay() {
         this.candidates = emptyList()
         this.threats = emptyList()
+        this.selectedSquare = null
         invalidate()
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (!isInputMoveMode) return false
+
+        if (event.action == MotionEvent.ACTION_UP) {
+            val bounds = boardBounds ?: return false
+            val tappedSquare = bounds.getSquareFromPixel(event.x, event.y)
+            if (tappedSquare != null) {
+                onSquareTapped?.invoke(tappedSquare)
+                invalidate()
+                return true
+            }
+        }
+        return true
     }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val bounds = boardBounds ?: return
 
-        // 1. Gambar Ancaman Lawan jika ada (Merah Halus)
-        for (threat in threats) {
-            val (startX, startY) = bounds.getSquareCenterPixel(threat.from)
-            val (endX, endY) = bounds.getSquareCenterPixel(threat.to)
-            drawSleekArrow(
-                canvas = canvas,
-                startX = startX,
-                startY = startY,
-                endX = endX,
-                endY = endY,
-                strokePaint = threatPaint,
-                headPaint = threatHeadPaint,
-                shaftWidth = bounds.squareSize * 0.16f,
-                headSize = bounds.squareSize * 0.36f
-            )
+        // 1. Gambar Grid Kalibrasi jika sedang dalam Mode Mapping
+        if (isMappingMode) {
+            drawMappingGrid(canvas, bounds)
         }
 
-        if (candidates.isEmpty()) return
+        // 2. Highlight Petak Terpilih (Source square saat menggerakkan anak catur)
+        selectedSquare?.let { sq ->
+            val (cx, cy) = bounds.getSquareCenterPixel(sq)
+            val half = bounds.squareSize / 2f
+            canvas.drawRect(cx - half, cy - half, cx + half, cy + half, highlightPaint)
+        }
 
-        // 2. Jika mode hanya Best Move (Persis seperti Image 2):
-        if (showOnlyBestMove) {
-            val best = candidates.firstOrNull() ?: return
+        // 3. Gambar panah rekomendasi langkah terbaik
+        if (candidates.isNotEmpty()) {
+            val best = candidates.first()
             val (startX, startY) = bounds.getSquareCenterPixel(best.from)
             val (endX, endY) = bounds.getSquareCenterPixel(best.to)
 
@@ -120,45 +137,26 @@ class ArrowOverlayView @JvmOverloads constructor(
                 endY = endY,
                 strokePaint = bestMovePaint,
                 headPaint = bestMoveHeadPaint,
-                shaftWidth = bounds.squareSize * 0.22f, // Tebal & mantap seperti di Chess.com
+                shaftWidth = bounds.squareSize * 0.22f,
                 headSize = bounds.squareSize * 0.44f
             )
-            return
-        }
-
-        // 3. Jika mode Top Lines (Diurutkan dari belakang agar #1 di posisi teratas)
-        val sorted = candidates.sortedByDescending { it.rankOrder }
-        for (cand in sorted) {
-            val (startX, startY) = bounds.getSquareCenterPixel(cand.from)
-            val (endX, endY) = bounds.getSquareCenterPixel(cand.to)
-
-            if (cand.rankOrder == 1) {
-                drawSleekArrow(
-                    canvas, startX, startY, endX, endY,
-                    bestMovePaint, bestMoveHeadPaint,
-                    bounds.squareSize * 0.22f, bounds.squareSize * 0.44f
-                )
-            } else {
-                val color = when (cand.rankOrder) {
-                    2 -> Color.argb(170, 96, 165, 250)  // Biru muda
-                    3 -> Color.argb(160, 168, 85, 247)  // Ungu
-                    4 -> Color.argb(150, 251, 191, 36)  // Kuning
-                    else -> Color.argb(140, 244, 114, 182) // Pink
-                }
-                candidatePaint.color = color
-                candidateHeadPaint.color = color
-                drawSleekArrow(
-                    canvas, startX, startY, endX, endY,
-                    candidatePaint, candidateHeadPaint,
-                    bounds.squareSize * 0.14f, bounds.squareSize * 0.30f
-                )
-            }
         }
     }
 
-    /**
-     * Menggambar panah vektor ramping dengan sudut proporsional & presisi
-     */
+    private fun drawMappingGrid(canvas: Canvas, bounds: BoardBounds) {
+        val sq = bounds.squareSize
+        // Border luar papan
+        canvas.drawRect(bounds.left, bounds.top, bounds.left + bounds.size, bounds.top + bounds.size, gridBorderPaint)
+
+        // Garis-garis petak 8x8
+        for (i in 1 until 8) {
+            val x = bounds.left + i * sq
+            canvas.drawLine(x, bounds.top, x, bounds.top + bounds.size, gridLinePaint)
+            val y = bounds.top + i * sq
+            canvas.drawLine(bounds.left, y, bounds.left + bounds.size, y, gridLinePaint)
+        }
+    }
+
     private fun drawSleekArrow(
         canvas: Canvas,
         startX: Float,
@@ -173,16 +171,13 @@ class ArrowOverlayView @JvmOverloads constructor(
         strokePaint.strokeWidth = shaftWidth
 
         val angle = atan2((endY - startY).toDouble(), (endX - startX).toDouble())
-        val headAngle = Math.PI / 5.2 // ~35 derajat
+        val headAngle = Math.PI / 5.2
 
-        // Potong sedikit ujung batang agar pas di sambungan kepala
         val adjustedEndX = (endX - cos(angle) * (headSize * 0.45f)).toFloat()
         val adjustedEndY = (endY - sin(angle) * (headSize * 0.45f)).toFloat()
 
-        // Badan panah
         canvas.drawLine(startX, startY, adjustedEndX, adjustedEndY, strokePaint)
 
-        // Kepala panah berbentuk segitiga halus
         arrowPath.reset()
         arrowPath.moveTo(endX, endY)
         val x1 = (endX - headSize * cos(angle - headAngle)).toFloat()

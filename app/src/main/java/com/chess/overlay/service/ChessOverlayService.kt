@@ -335,6 +335,130 @@ class ChessOverlayService : Service() {
             updateBoardBounds()
             arrowOverlayView?.invalidate()
         }
+
+        // Setup Posisi Papan (Mid/Endgame)
+        val btnToggleSetup = view.findViewById<Button>(R.id.btnToggleSetup)
+        val setupPanel = view.findViewById<LinearLayout>(R.id.setupPanel)
+        val setupBoard = view.findViewById<com.chess.overlay.core.overlay.SetupBoardView>(R.id.setupBoardView)
+        val btnSetupClear = view.findViewById<Button>(R.id.btnSetupClear)
+        val btnSetupDefault32 = view.findViewById<Button>(R.id.btnSetupDefault32)
+        val btnSetupTurn = view.findViewById<Button>(R.id.btnSetupTurn)
+        val btnPieceColorToggle = view.findViewById<Button>(R.id.btnPieceColorToggle)
+        val btnFinishSetup = view.findViewById<Button>(R.id.btnFinishSetup)
+
+        val btnToolMove = view.findViewById<Button>(R.id.btnToolMove)
+        val btnToolPawn = view.findViewById<Button>(R.id.btnToolPawn)
+        val btnToolKnight = view.findViewById<Button>(R.id.btnToolKnight)
+        val btnToolBishop = view.findViewById<Button>(R.id.btnToolBishop)
+        val btnToolRook = view.findViewById<Button>(R.id.btnToolRook)
+        val btnToolQueen = view.findViewById<Button>(R.id.btnToolQueen)
+        val btnToolKing = view.findViewById<Button>(R.id.btnToolKing)
+        val btnToolDelete = view.findViewById<Button>(R.id.btnToolDelete)
+
+        setupBoard.boardState = boardState
+        setupBoard.isWhiteBottom = isWhiteBottom
+
+        var isSetupVisible = false
+        btnToggleSetup.setOnClickListener {
+            isSetupVisible = !isSetupVisible
+            setupPanel.visibility = if (isSetupVisible) View.VISIBLE else View.GONE
+            btnToggleSetup.text = if (isSetupVisible) "▲ Tutup Setup Posisi" else "🛠️ Setup Posisi Papan (Mid/Endgame)"
+            if (isSetupVisible) {
+                setupBoard.isWhiteBottom = isWhiteBottom
+                setupBoard.invalidate()
+            }
+        }
+
+        btnSetupClear.setOnClickListener {
+            boardState.clearBoard()
+            setupBoard.invalidate()
+            arrowOverlayView?.clearOverlay()
+        }
+
+        btnSetupDefault32.setOnClickListener {
+            boardState.resetToStartingPosition()
+            setupBoard.invalidate()
+        }
+
+        btnSetupTurn.text = if (boardState.isWhiteToMove) "Giliran: Putih" else "Giliran: Hitam"
+        btnSetupTurn.setOnClickListener {
+            boardState.isWhiteToMove = !boardState.isWhiteToMove
+            btnSetupTurn.text = if (boardState.isWhiteToMove) "Giliran: Putih" else "Giliran: Hitam"
+        }
+
+        btnPieceColorToggle.setOnClickListener {
+            setupBoard.activePieceIsWhite = !setupBoard.activePieceIsWhite
+            btnPieceColorToggle.text = if (setupBoard.activePieceIsWhite) "Warna Bidak: ⚪ Putih" else "Warna Bidak: ⚫ Hitam"
+        }
+
+        val toolButtons = listOf(btnToolMove, btnToolPawn, btnToolKnight, btnToolBishop, btnToolRook, btnToolQueen, btnToolKing, btnToolDelete)
+        fun selectToolButton(activeBtn: Button) {
+            toolButtons.forEach {
+                it.setBackgroundColor(Color.TRANSPARENT)
+                it.setTextColor(Color.parseColor("#94A3B8"))
+            }
+            activeBtn.setBackgroundColor(Color.parseColor("#0284C7"))
+            activeBtn.setTextColor(Color.WHITE)
+        }
+
+        btnToolMove.setOnClickListener {
+            setupBoard.currentTool = com.chess.overlay.core.overlay.SetupTool.MOVE
+            selectToolButton(btnToolMove)
+        }
+        btnToolPawn.setOnClickListener {
+            setupBoard.currentTool = com.chess.overlay.core.overlay.SetupTool.PLACE
+            setupBoard.activePieceType = com.chess.overlay.core.model.PieceType.PAWN
+            selectToolButton(btnToolPawn)
+        }
+        btnToolKnight.setOnClickListener {
+            setupBoard.currentTool = com.chess.overlay.core.overlay.SetupTool.PLACE
+            setupBoard.activePieceType = com.chess.overlay.core.model.PieceType.KNIGHT
+            selectToolButton(btnToolKnight)
+        }
+        btnToolBishop.setOnClickListener {
+            setupBoard.currentTool = com.chess.overlay.core.overlay.SetupTool.PLACE
+            setupBoard.activePieceType = com.chess.overlay.core.model.PieceType.BISHOP
+            selectToolButton(btnToolBishop)
+        }
+        btnToolRook.setOnClickListener {
+            setupBoard.currentTool = com.chess.overlay.core.overlay.SetupTool.PLACE
+            setupBoard.activePieceType = com.chess.overlay.core.model.PieceType.ROOK
+            selectToolButton(btnToolRook)
+        }
+        btnToolQueen.setOnClickListener {
+            setupBoard.currentTool = com.chess.overlay.core.overlay.SetupTool.PLACE
+            setupBoard.activePieceType = com.chess.overlay.core.model.PieceType.QUEEN
+            selectToolButton(btnToolQueen)
+        }
+        btnToolKing.setOnClickListener {
+            setupBoard.currentTool = com.chess.overlay.core.overlay.SetupTool.PLACE
+            setupBoard.activePieceType = com.chess.overlay.core.model.PieceType.KING
+            selectToolButton(btnToolKing)
+        }
+        btnToolDelete.setOnClickListener {
+            setupBoard.currentTool = com.chess.overlay.core.overlay.SetupTool.DELETE
+            selectToolButton(btnToolDelete)
+        }
+
+        btnFinishSetup.setOnClickListener {
+            val (wk, bk) = boardState.countKings()
+            if (wk == 0 || bk == 0) {
+                Toast.makeText(this, "Posisi harus memiliki minimal 1 Raja Putih dan 1 Raja Hitam!", Toast.LENGTH_LONG).show()
+                return@setOnClickListener
+            }
+
+            isSetupVisible = false
+            setupPanel.visibility = View.GONE
+            btnToggleSetup.text = "🛠️ Setup Posisi Papan (Mid/Endgame)"
+
+            // Jalankan Stockfish langsung dari posisi baru ini
+            isEngineRunning = true
+            btnToggleEngine.text = "⏸️ PAUSE"
+            btnToggleEngine.setBackgroundColor(getColor(R.color.threat_arrow))
+            enableTouchInputMode(true)
+            calculateStockfishMoves()
+            Toast.makeText(this, "Posisi berhasil disetup! Stockfish mulai menghitung.", Toast.LENGTH_SHORT).show()
+        }
     }
 
     /**

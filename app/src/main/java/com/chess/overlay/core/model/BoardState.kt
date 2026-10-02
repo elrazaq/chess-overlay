@@ -88,6 +88,58 @@ class BoardState {
     }
 
     /**
+     * Mengosongkan seluruh petak papan (berguna untuk setup endgame/lategame)
+     */
+    fun clearBoard() {
+        for (r in 0 until 8) {
+            for (c in 0 until 8) {
+                grid[r][c] = null
+            }
+        }
+        moveHistory.clear()
+    }
+
+    /**
+     * Menaruh atau menghapus bidak pada petak tertentu secara langsung
+     */
+    fun setPiece(square: Square, piece: Piece?) {
+        val row = 7 - square.rank
+        val col = square.file
+        grid[row][col] = piece
+    }
+
+    /**
+     * Memindahkan bidak secara bebas tanpa batasan giliran/aturan jalan (untuk mode setup posisi)
+     */
+    fun movePieceFree(from: Square, to: Square) {
+        val fromRow = 7 - from.rank
+        val fromCol = from.file
+        val toRow = 7 - to.rank
+        val toCol = to.file
+
+        val piece = grid[fromRow][fromCol] ?: return
+        grid[toRow][toCol] = piece
+        grid[fromRow][fromCol] = null
+    }
+
+    /**
+     * Menghitung jumlah raja (harus ada minimal 1 putih dan 1 hitam agar Stockfish valid)
+     */
+    fun countKings(): Pair<Int, Int> {
+        var whiteKings = 0
+        var blackKings = 0
+        for (r in 0 until 8) {
+            for (c in 0 until 8) {
+                val p = grid[r][c]
+                if (p?.type == PieceType.KING) {
+                    if (p.isWhite) whiteKings++ else blackKings++
+                }
+            }
+        }
+        return Pair(whiteKings, blackKings)
+    }
+
+    /**
      * Memvalidasi apakah pergerakan anak catur sah sesuai aturan catur.
      * Mencegah langkah ilegal (seperti pion jalan mundur atau langkah hantu).
      */

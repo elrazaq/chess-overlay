@@ -193,6 +193,216 @@
                 android:padding="0dp" />
         </LinearLayout>
 
+        <!-- Button Toggle Buka/Tutup Setup Posisi -->
+        <Button
+            android:id="@+id/btnToggleSetup"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="32dp"
+            android:layout_marginTop="4dp"
+            android:text="🛠️ Setup Posisi Papan (Mid/Endgame)"
+            android:textColor="#38BDF8"
+            android:textSize="9.5sp"
+            android:padding="0dp" />
+
+        <!-- Sub-panel Setup Posisi (Default: GONE) -->
+        <LinearLayout
+            android:id="@+id/setupPanel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="#151E2E"
+            android:padding="6dp"
+            android:layout_marginTop="4dp"
+            android:visibility="gone">
+
+            <!-- Bar Atas Setup: Kosongkan, Formasi 32, Giliran -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/btnSetupClear"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="30dp"
+                    android:layout_weight="1"
+                    android:text="🗑️ Kosong"
+                    android:textColor="#EF4444"
+                    android:textSize="8.5sp"
+                    android:padding="0dp"
+                    android:layout_marginEnd="2dp" />
+
+                <Button
+                    android:id="@+id/btnSetupDefault32"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="30dp"
+                    android:layout_weight="1"
+                    android:text="♟️ 32 Bidak"
+                    android:textColor="#F59E0B"
+                    android:textSize="8.5sp"
+                    android:padding="0dp"
+                    android:layout_marginEnd="2dp" />
+
+                <Button
+                    android:id="@+id/btnSetupTurn"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="30dp"
+                    android:layout_weight="1.2"
+                    android:text="Giliran: Hitam"
+                    android:textColor="#E2E8F0"
+                    android:textSize="8.5sp"
+                    android:padding="0dp" />
+            </LinearLayout>
+
+            <!-- Papan Catur Mini Setup -->
+            <com.chess.overlay.core.overlay.SetupBoardView
+                android:id="@+id/setupBoardView"
+                android:layout_width="190dp"
+                android:layout_height="190dp"
+                android:layout_gravity="center_horizontal"
+                android:layout_marginTop="6dp"
+                android:layout_marginBottom="6dp" />
+
+            <!-- Palette Bidak & Tool -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center">
+
+                <Button
+                    android:id="@+id/btnToolMove"
+                    android:layout_width="0dp"
+                    android:layout_height="28dp"
+                    android:layout_weight="1.2"
+                    android:text="🖐️ Pindah"
+                    android:backgroundTint="#0284C7"
+                    android:textColor="#FFFFFF"
+                    android:textSize="8sp"
+                    android:padding="0dp"
+                    android:layout_marginEnd="2dp" />
+
+                <Button
+                    android:id="@+id/btnToolPawn"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="28dp"
+                    android:layout_weight="0.8"
+                    android:text="♙"
+                    android:textColor="#FFFFFF"
+                    android:textSize="12sp"
+                    android:padding="0dp"
+                    android:layout_marginEnd="2dp" />
+
+                <Button
+                    android:id="@+id/btnToolKnight"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="28dp"
+                    android:layout_weight="0.8"
+                    android:text="♘"
+                    android:textColor="#FFFFFF"
+                    android:textSize="12sp"
+                    android:padding="0dp"
+                    android:layout_marginEnd="2dp" />
+
+                <Button
+                    android:id="@+id/btnToolBishop"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="28dp"
+                    android:layout_weight="0.8"
+                    android:text="♗"
+                    android:textColor="#FFFFFF"
+                    android:textSize="12sp"
+                    android:padding="0dp"
+                    android:layout_marginEnd="2dp" />
+
+                <Button
+                    android:id="@+id/btnToolRook"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="28dp"
+                    android:layout_weight="0.8"
+                    android:text="♖"
+                    android:textColor="#FFFFFF"
+                    android:textSize="12sp"
+                    android:padding="0dp"
+                    android:layout_marginEnd="2dp" />
+
+                <Button
+                    android:id="@+id/btnToolQueen"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="28dp"
+                    android:layout_weight="0.8"
+                    android:text="♕"
+                    android:textColor="#FFFFFF"
+                    android:textSize="12sp"
+                    android:padding="0dp"
+                    android:layout_marginEnd="2dp" />
+
+                <Button
+                    android:id="@+id/btnToolKing"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="28dp"
+                    android:layout_weight="0.8"
+                    android:text="♔"
+                    android:textColor="#FFFFFF"
+                    android:textSize="12sp"
+                    android:padding="0dp"
+                    android:layout_marginEnd="2dp" />
+
+                <Button
+                    android:id="@+id/btnToolDelete"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="28dp"
+                    android:layout_weight="0.8"
+                    android:text="❌"
+                    android:textColor="#EF4444"
+                    android:textSize="9sp"
+                    android:padding="0dp" />
+            </LinearLayout>
+
+            <!-- Toggle Warna Bidak yang Ditaruh -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/btnPieceColorToggle"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="28dp"
+                    android:layout_weight="1"
+                    android:text="Warna Bidak: ⚪ Putih"
+                    android:textColor="#E2E8F0"
+                    android:textSize="8.5sp"
+                    android:padding="0dp" />
+            </LinearLayout>
+
+            <!-- Selesai & Hitung Posisi Ini -->
+            <Button
+                android:id="@+id/btnFinishSetup"
+                android:layout_width="match_parent"
+                android:layout_height="34dp"
+                android:layout_marginTop="6dp"
+                android:text="🚀 Selesai &amp; Hitung Posisi Ini"
+                android:backgroundTint="#059669"
+                android:textColor="#FFFFFF"
+                android:textSize="10sp"
+                android:textStyle="bold"
+                android:padding="0dp" />
+        </LinearLayout>
+
         <!-- Calibration Sub-panel -->
         <LinearLayout
             android:id="@+id/calibrationPanel"

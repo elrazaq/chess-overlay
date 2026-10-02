@@ -52,6 +52,13 @@ class MainActivity : AppCompatActivity() {
         tvCaptureStatus = findViewById(R.id.tvCapturePermissionStatus)
         btnToggle = findViewById(R.id.btnToggleService)
 
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 101)
+            }
+        }
+
+
         btnToggle.setOnClickListener {
             if (isServiceRunning) {
                 stopOverlayService()
@@ -113,10 +120,9 @@ class MainActivity : AppCompatActivity() {
         btnToggle.text = getString(R.string.btn_stop_service)
         btnToggle.setBackgroundColor(androidx.core.content.ContextCompat.getColor(this, R.color.threat_arrow))
 
-        Toast.makeText(this, "Overlay aktif! Buka aplikasi catur dan klik bubble SCAN", Toast.LENGTH_LONG).show()
-        // Minimize app to allow user to open chess app
-        moveTaskToBack(true)
+        Toast.makeText(this, "Bubble SCAN berhasil aktif di layar! Silakan buka aplikasi catur.", Toast.LENGTH_LONG).show()
     }
+
 
     private fun stopOverlayService() {
         val serviceIntent = Intent(this, ChessOverlayService::class.java)

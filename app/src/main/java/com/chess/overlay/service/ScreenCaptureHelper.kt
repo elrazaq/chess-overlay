@@ -44,24 +44,36 @@ class ScreenCaptureHelper(
     }
 
     private fun setupVirtualDisplay() {
-        imageReader = ImageReader.newInstance(
-            screenWidth,
-            screenHeight,
-            PixelFormat.RGBA_8888,
-            2
-        )
+        try {
+            // Wajib didaftarkan pada Android 14+ sebelum memanggil createVirtualDisplay
+            mediaProjection.registerCallback(object : MediaProjection.Callback() {
+                override fun onStop() {
+                    super.onStop()
+                }
+            }, android.os.Handler(android.os.Looper.getMainLooper()))
 
-        virtualDisplay = mediaProjection.createVirtualDisplay(
-            "ChessCapture",
-            screenWidth,
-            screenHeight,
-            screenDensity,
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-            imageReader?.surface,
-            null,
-            null
-        )
+            imageReader = ImageReader.newInstance(
+                screenWidth,
+                screenHeight,
+                PixelFormat.RGBA_8888,
+                2
+            )
+
+            virtualDisplay = mediaProjection.createVirtualDisplay(
+                "ChessCapture",
+                screenWidth,
+                screenHeight,
+                screenDensity,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                imageReader?.surface,
+                null,
+                null
+            )
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
+
 
     /**
      * Mengambil 1 lembar tangkapan layar (snapshot) saat tombol SCAN ditekan.

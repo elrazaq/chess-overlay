@@ -46,84 +46,110 @@ class ChessOverlayService : Service() {
     override fun onCreate() {
         super.onCreate()
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        startForegroundNotification()
-        stockfishEngine = StockfishBridge(context = this, threads = 2, hashMb = 16)
-        stockfishEngine.start()
+        try {
+            stockfishEngine = StockfishBridge(context = this, threads = 2, hashMb = 16)
+            stockfishEngine.start()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
-
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, Activity.RESULT_CANCELED) ?: Activity.RESULT_CANCELED
-        val resultData = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            intent?.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
-        } else {
-            @Suppress("DEPRECATION")
-            intent?.getParcelableExtra(EXTRA_RESULT_DATA)
-        }
+        try {
+            startForegroundNotification()
 
-        if (resultCode == Activity.RESULT_OK && resultData != null) {
-            val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-            val mediaProjection = projectionManager.getMediaProjection(resultCode, resultData)
-            setupScreenCapture(mediaProjection)
-            setupOverlayViews()
+            val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, Activity.RESULT_CANCELED) ?: Activity.RESULT_CANCELED
+            val resultData = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                intent?.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                intent?.getParcelableExtra(EXTRA_RESULT_DATA)
+            }
+
+            if (resultCode == Activity.RESULT_OK && resultData != null) {
+                val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                val mediaProjection = projectionManager.getMediaProjection(resultCode, resultData)
+                setupScreenCapture(mediaProjection)
+                setupOverlayViews()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Toast.makeText(this, "Error memulai overlay: ${e.message}", Toast.LENGTH_LONG).show()
         }
 
         return START_NOT_STICKY
     }
 
     private fun setupScreenCapture(mediaProjection: MediaProjection) {
-        screenCaptureHelper = ScreenCaptureHelper(this, mediaProjection)
+        try {
+            screenCaptureHelper = ScreenCaptureHelper(this, mediaProjection)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     @SuppressLint("InflateParams")
     private fun setupOverlayViews() {
         val wm = windowManager ?: return
 
-        // 1. Fullscreen Transparent Arrow Overlay (Touch Passthrough)
-        val overlayType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-        } else {
-            @Suppress("DEPRECATION")
-            WindowManager.LayoutParams.TYPE_PHONE
+        // Periksa izin overlay
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !android.provider.Settings.canDrawOverlays(this)) {
+            Toast.makeText(this, "Izin overlay belum aktif!", Toast.LENGTH_LONG).show()
+            return
         }
 
-        val arrowParams = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.MATCH_PARENT,
-            overlayType,
-            WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-            PixelFormat.TRANSLUCENT
-        )
+        try {
+            val overlayType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            } else {
+                @Suppress("DEPRECATION")
+                WindowManager.LayoutParams.TYPE_PHONE
+            }
 
-        arrowOverlayView = ArrowOverlayView(this)
-        wm.addView(arrowOverlayView, arrowParams)
+            // 1. Fullscreen Transparent Arrow Overlay (Touch Passthrough)
+            val arrowParams = WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT,
+                overlayType,
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                PixelFormat.TRANSLUCENT
+            )
 
-        // 2. Floating Bubble Trigger (Bisa Digeser & Diklik)
-        val bubbleInflater = LayoutInflater.from(this)
-        bubbleView = bubbleInflater.inflate(R.layout.floating_bubble, null)
+            arrowOverlayView = ArrowOverlayView(this)
+            wm.addView(arrowOverlayView, arrowParams)
 
-        val bubbleParams = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            overlayType,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.TOP or Gravity.START
-            x = 100
-            y = 300
-        }
+            // 2. Floating Bubble Trigger (Bisa Digeser & Diklik)
+            val themedContext = android.view.ContextThemeWrapper(this, R.style.Theme_ChessOverlay)
+            val bubbleInflater = LayoutInflater.from(themedContext)
+            bubbleView = bubbleInflater.inflate(R.layout.floating_bubble, null)
 
-        setupBubbleTouchListener(bubbleParams)
-        wm.addView(bubbleView, bubbleParams)
+            val bubbleParams = WindowManager.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                overlayType,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = Gravity.TOP or Gravity.START
+                x = 100
+                y = 300
+            }
 
-        // Klik bubble untuk trigger analisis
-        bubbleView?.findViewById<View>(R.id.btnAnalyzeTrigger)?.setOnClickListener {
-            performBoardAnalysis()
+            setupBubbleTouchListener(bubbleParams)
+            wm.addView(bubbleView, bubbleParams)
+
+            // Klik bubble untuk trigger analisis
+            bubbleView?.findViewById<View>(R.id.btnAnalyzeTrigger)?.setOnClickListener {
+                performBoardAnalysis()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Toast.makeText(this, "Gagal menampilkan bubble: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
+
 
     @SuppressLint("ClickableViewAccessibility")
     private fun setupBubbleTouchListener(params: WindowManager.LayoutParams) {
@@ -203,8 +229,17 @@ class ChessOverlayService : Service() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
 
-        startForeground(NOTIFICATION_ID, notification)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
     }
+
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

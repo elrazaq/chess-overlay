@@ -37,6 +37,7 @@ class ArrowOverlayView @JvmOverloads constructor(
 
     // Callback saat petak catur disentuh dalam mode manual input
     var onSquareTapped: ((Square) -> Unit)? = null
+    var onMoveDragged: ((from: Square, to: Square) -> Unit)? = null
 
     // Paints
     private val bestMovePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -91,9 +92,6 @@ class ArrowOverlayView @JvmOverloads constructor(
         this.selectedSquare = null
         invalidate()
     }
-
-    var onSquareTapped: ((Square) -> Unit)? = null
-    var onMoveDragged: ((from: Square, to: Square) -> Unit)? = null
     private var downSquare: Square? = null
 
     override fun onTouchEvent(event: MotionEvent): Boolean {

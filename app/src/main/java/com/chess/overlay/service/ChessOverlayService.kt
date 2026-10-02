@@ -42,6 +42,12 @@ class ChessOverlayService : Service() {
     private var arrowOverlayView: ArrowOverlayView? = null
     private var panelView: View? = null
     private var arrowLayoutParams: WindowManager.LayoutParams? = null
+    private var setupBoardView: com.chess.overlay.core.overlay.SetupBoardView? = null
+
+    // Live Auto-Tracking State
+    private var liveTrackingJob: Job? = null
+    private val lastSquareLuminances = FloatArray(64)
+    private var hasBaseline = false
 
     // Engine & Board State Virtual
     private val boardState = BoardState()
@@ -266,18 +272,22 @@ class ChessOverlayService : Service() {
             btnMinimize.text = if (isPanelMinimized) "▲" else "▼"
         }
 
-        // Toggle Engine Start / Pause (Sekaligus Men-Trigger Mode Tap Layar!)
+        // Toggle Engine Start / Pause (Live Tracking Otomatis Tanpa Jeda Sentuhan!)
         btnToggleEngine.setOnClickListener {
             isEngineRunning = !isEngineRunning
             if (isEngineRunning) {
-                btnToggleEngine.text = "⏸️ PAUSE"
+                btnToggleEngine.text = "🟢 AKTIF"
                 btnToggleEngine.setBackgroundColor(getColor(R.color.threat_arrow))
-                enableTouchInputMode(true) // Otomatis aktifkan mode tap layar!
+                enableTouchInputMode(false) // Sentuhan tembus 100% ke game catur tanpa halangan!
+                hasBaseline = false
+                startLiveTracking()
                 calculateStockfishMoves()
+                Toast.makeText(this, "Auto-Tracking aktif! Gerakkan bidak catur Anda seperti biasa.", Toast.LENGTH_SHORT).show()
             } else {
                 btnToggleEngine.text = "▶️ START"
                 btnToggleEngine.setBackgroundColor(getColor(R.color.accent))
-                enableTouchInputMode(false) // Otomatis tembus pandang ke aplikasi catur!
+                enableTouchInputMode(false)
+                stopLiveTracking()
                 tvEngineTitle.text = "Engine Dijeda (Sentuhan Bebas)"
                 arrowOverlayView?.clearOverlay()
             }
@@ -289,6 +299,8 @@ class ChessOverlayService : Service() {
             if (best != null) {
                 boardState.makeMove(best.from, best.to, skipValidation = true)
                 Toast.makeText(this, "Langkah diterapkan: ${best.from.toUci()} -> ${best.to.toUci()}", Toast.LENGTH_SHORT).show()
+                hasBaseline = false
+                setupBoardView?.invalidate()
                 if (isEngineRunning) {
                     calculateStockfishMoves()
                 } else {
@@ -307,6 +319,8 @@ class ChessOverlayService : Service() {
         // Undo Move
         btnUndo.setOnClickListener {
             if (boardState.undoMove()) {
+                hasBaseline = false
+                setupBoardView?.invalidate()
                 Toast.makeText(this, "Langkah diurungkan (Undo)", Toast.LENGTH_SHORT).show()
                 sourceSquare = null
                 arrowOverlayView?.selectedSquare = null
@@ -320,7 +334,9 @@ class ChessOverlayService : Service() {
             boardState.resetToStartingPosition()
             sourceSquare = null
             arrowOverlayView?.selectedSquare = null
-            Toast.makeText(this, "32 Bidak catur berhasil dipetakan ke posisi awal!", Toast.LENGTH_SHORT).show()
+            hasBaseline = false
+            setupBoardView?.invalidate()
+            Toast.makeText(this, "32 Bidak direset ke posisi awal! Silakan mulai melangkah.", Toast.LENGTH_SHORT).show()
             if (isEngineRunning) calculateStockfishMoves()
             else arrowOverlayView?.clearOverlay()
         }
@@ -368,7 +384,7 @@ class ChessOverlayService : Service() {
         val btnToggleSetup = view.findViewById<Button>(R.id.btnToggleSetup)
         val setupPanel = view.findViewById<LinearLayout>(R.id.setupPanel)
         val setupBoard = view.findViewById<com.chess.overlay.core.overlay.SetupBoardView>(R.id.setupBoardView)
-        val btnSetupAutoScan = view.findViewById<Button>(R.id.btnSetupAutoScan)
+        setupBoardView = setupBoard
         val btnSetupClear = view.findViewById<Button>(R.id.btnSetupClear)
         val btnSetupDefault32 = view.findViewById<Button>(R.id.btnSetupDefault32)
         val btnSetupTurn = view.findViewById<Button>(R.id.btnSetupTurn)
@@ -395,69 +411,6 @@ class ChessOverlayService : Service() {
             if (isSetupVisible) {
                 setupBoard.isWhiteBottom = isWhiteBottom
                 setupBoard.invalidate()
-            }
-        }
-
-        btnSetupAutoScan.setOnClickListener {
-            val helper = screenCaptureHelper
-            if (helper == null) {
-                Toast.makeText(
-                    this,
-                    "Izin rekam layar belum aktif! Buka aplikasi ChessOverlay dan klik Mulai untuk aktifkan Auto-Scan.",
-                    Toast.LENGTH_LONG
-                ).show()
-                return@setOnClickListener
-            }
-
-            serviceScope.launch {
-                try {
-                    btnSetupAutoScan.text = "⏳ Memindai Layar..."
-                    btnSetupAutoScan.isEnabled = false
-
-                    // Sembunyikan panel agar screenshot menangkap papan catur bersih di bawahnya
-                    panelView?.visibility = View.GONE
-                    arrowOverlayView?.visibility = View.GONE
-                    delay(250) // Beri waktu 250ms agar sistem compositing Android merender frame bersih
-
-                    val bitmap = helper.captureSnapshot()
-
-                    panelView?.visibility = View.VISIBLE
-                    arrowOverlayView?.visibility = View.VISIBLE
-
-                    if (bitmap == null) {
-                        Toast.makeText(this@ChessOverlayService, "Gagal menangkap layar. Coba ulangi.", Toast.LENGTH_SHORT).show()
-                        btnSetupAutoScan.text = "📷 Auto Scan Posisi Layar"
-                        btnSetupAutoScan.isEnabled = true
-                        return@launch
-                    }
-
-                    // Temukan batas presisi papan catur secara otomatis dari screenshot
-                    val detectedBounds = boardDetector.findBoard(bitmap, isWhiteBottom)
-                    currentBoardBounds = detectedBounds
-                    boardTopY = detectedBounds.top
-                    boardWidth = detectedBounds.size
-                    arrowOverlayView?.boardBounds = detectedBounds
-
-                    // Pindai seluruh 64 petak ke boardState menggunakan classifier baru
-                    pieceClassifier.scanBoardToBoardState(bitmap, detectedBounds, boardState)
-                    setupBoard.boardState = boardState
-                    setupBoard.invalidate()
-
-                    btnSetupAutoScan.text = "📷 Auto Scan Posisi Layar"
-                    btnSetupAutoScan.isEnabled = true
-                    Toast.makeText(
-                        this@ChessOverlayService,
-                        "Posisi berhasil dipetakan! Periksa di papan mini & sesuaikan jika perlu.",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                    panelView?.visibility = View.VISIBLE
-                    arrowOverlayView?.visibility = View.VISIBLE
-                    btnSetupAutoScan.text = "📷 Auto Scan Posisi Layar"
-                    btnSetupAutoScan.isEnabled = true
-                    Toast.makeText(this@ChessOverlayService, "Error auto-scan: ${e.message}", Toast.LENGTH_SHORT).show()
-                }
             }
         }
 
@@ -680,6 +633,121 @@ class ChessOverlayService : Service() {
         }
     }
 
+    private fun stopLiveTracking() {
+        liveTrackingJob?.cancel()
+        liveTrackingJob = null
+        hasBaseline = false
+    }
+
+    private fun startLiveTracking() {
+        stopLiveTracking()
+        liveTrackingJob = serviceScope.launch(Dispatchers.Default) {
+            while (isActive) {
+                delay(380)
+                if (!isEngineRunning) continue
+
+                val helper = screenCaptureHelper ?: continue
+                val bitmap = helper.captureSnapshot() ?: continue
+
+                // Pastikan batas papan catur sudah terdeteksi
+                var bounds = currentBoardBounds
+                if (bounds == null) {
+                    bounds = boardDetector.findBoard(bitmap, isWhiteBottom)
+                    currentBoardBounds = bounds
+                    withContext(Dispatchers.Main) {
+                        arrowOverlayView?.boardBounds = bounds
+                    }
+                }
+
+                val sq = bounds.squareSize
+                val currentLums = FloatArray(64)
+
+                // Hitung rata-rata luminansi piksel tengah pada masing-masing 64 petak
+                for (rank in 0..7) {
+                    for (file in 0..7) {
+                        val col = if (isWhiteBottom) file else (7 - file)
+                        val row = if (isWhiteBottom) (7 - rank) else rank
+
+                        val startX = (bounds.left + col * sq).toInt().coerceIn(0, bitmap.width - 1)
+                        val startY = (bounds.top + row * sq).toInt().coerceIn(0, bitmap.height - 1)
+                        val s = sq.toInt().coerceAtMost(bitmap.width - startX).coerceAtMost(bitmap.height - startY)
+                        if (s <= 10) continue
+
+                        val m = (s * 0.22f).toInt()
+                        var sum = 0L
+                        var count = 0
+                        for (y in m until (s - m) step 2) {
+                            val py = startY + y
+                            if (py >= bitmap.height) continue
+                            for (x in m until (s - m) step 2) {
+                                val px = startX + x
+                                if (px >= bitmap.width) continue
+                                val p = bitmap.getPixel(px, py)
+                                val lum = ((p shr 16 and 0xFF) * 299 + (p shr 8 and 0xFF) * 587 + (p and 0xFF) * 114) / 1000
+                                sum += lum
+                                count++
+                            }
+                        }
+
+                        val avg = if (count > 0) sum.toFloat() / count else 0f
+                        currentLums[rank * 8 + file] = avg
+                    }
+                }
+
+                if (!hasBaseline) {
+                    System.arraycopy(currentLums, 0, lastSquareLuminances, 0, 64)
+                    hasBaseline = true
+                    continue
+                }
+
+                val changedSquares = mutableListOf<Square>()
+                for (rank in 0..7) {
+                    for (file in 0..7) {
+                        val idx = rank * 8 + file
+                        val diff = Math.abs(currentLums[idx] - lastSquareLuminances[idx])
+                        if (diff > 20f) {
+                            changedSquares.add(Square(file, rank))
+                        }
+                    }
+                }
+
+                if (changedSquares.size in 2..4) {
+                    var validFrom: Square? = null
+                    var validTo: Square? = null
+
+                    for (from in changedSquares) {
+                        val p = boardState.getPiece(from)
+                        if (p != null && p.isWhite == boardState.isWhiteToMove) {
+                            for (to in changedSquares) {
+                                if (from != to && boardState.isValidMove(from, to)) {
+                                    validFrom = from
+                                    validTo = to
+                                    break
+                                }
+                            }
+                        }
+                        if (validFrom != null) break
+                    }
+
+                    if (validFrom != null && validTo != null) {
+                        System.arraycopy(currentLums, 0, lastSquareLuminances, 0, 64)
+                        val fromSq = validFrom
+                        val toSq = validTo
+
+                        withContext(Dispatchers.Main) {
+                            val moved = boardState.makeMove(fromSq, toSq)
+                            if (moved) {
+                                setupBoardView?.invalidate()
+                                calculateStockfishMoves()
+                            }
+                        }
+                        delay(350)
+                    }
+                }
+            }
+        }
+    }
+
     private fun startForegroundNotification() {
         createNotificationChannel()
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
@@ -714,6 +782,7 @@ class ChessOverlayService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        stopLiveTracking()
         serviceScope.cancel()
         stockfishEngine.stop()
         screenCaptureHelper?.release()

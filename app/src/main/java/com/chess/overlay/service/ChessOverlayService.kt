@@ -319,7 +319,7 @@ class ChessOverlayService : Service() {
                 sourceSquare = null
                 arrowOverlayView?.selectedSquare = null
                 setupBoardView?.selectedSquare = null
-                setupBoardView?.bestCandidate = null
+                setupBoardView?.candidates = emptyList()
                 setupBoardView?.invalidate()
                 arrowOverlayView?.invalidate()
                 enterMappingMode()
@@ -344,7 +344,7 @@ class ChessOverlayService : Service() {
             countdownJob?.cancel()
             boardState.resetToStartingPosition()
             setupBoard.selectedSquare = null
-            setupBoard.bestCandidate = null
+            setupBoard.candidates = emptyList()
             setupBoard.invalidate()
             arrowOverlayView?.clearOverlay()
             if (isEngineRunning) {
@@ -594,7 +594,7 @@ class ChessOverlayService : Service() {
             sourceSquare = null
             arrowOverlayView?.selectedSquare = null
             setupBoardView?.selectedSquare = null
-            setupBoardView?.bestCandidate = null
+            setupBoardView?.candidates = emptyList()
             setupBoardView?.invalidate()
             arrowOverlayView?.invalidate()
 
@@ -650,46 +650,43 @@ class ChessOverlayService : Service() {
             val tvLine1 = view.findViewById<TextView>(R.id.tvLine1)
             val tvLine2 = view.findViewById<TextView>(R.id.tvLine2)
             val tvLine3 = view.findViewById<TextView>(R.id.tvLine3)
+            val tvLine4 = view.findViewById<TextView>(R.id.tvLine4)
+            val tvLine5 = view.findViewById<TextView>(R.id.tvLine5)
+            val textViews = listOf(tvLine1, tvLine2, tvLine3, tvLine4, tvLine5)
 
             val fen = boardState.toFen()
-            tvLine1.text = "#1: Mengkalkulasi..."
+            tvLine1?.text = "#1: Mengkalkulasi..."
 
-            val candidates = stockfishEngine.analyzeFen(fen, moveTimeMs = 550)
+            val candidates = stockfishEngine.analyzeFen(fen, moveTimeMs = 600)
             currentCandidates = candidates
 
             if (candidates.isNotEmpty()) {
-                val best = candidates[0]
-                val scoreText = if (best.isMate) "M${best.mateMoves}" else {
-                    val sign = if (best.scoreCp >= 0) "+" else ""
-                    String.format("%s%.1f", sign, best.scoreCp / 100.0)
-                }
-                val movesString = best.pvLine.take(5).joinToString(" ")
-                tvLine1.text = "#1: [$scoreText] $movesString"
-
-                if (candidates.size > 1) {
-                    val c2 = candidates[1]
-                    tvLine2.text = "#2: ${c2.pvLine.take(4).joinToString(" ")}"
-                    tvLine2.visibility = View.VISIBLE
-                } else {
-                    tvLine2.visibility = View.GONE
-                }
-
-                if (candidates.size > 2) {
-                    val c3 = candidates[2]
-                    tvLine3.text = "#3: ${c3.pvLine.take(4).joinToString(" ")}"
-                    tvLine3.visibility = View.VISIBLE
-                } else {
-                    tvLine3.visibility = View.GONE
+                for (i in 0 until 5) {
+                    if (i < candidates.size) {
+                        val cand = candidates[i]
+                        val scoreText = if (cand.isMate) "M${cand.mateMoves}" else {
+                            val sign = if (cand.scoreCp >= 0) "+" else ""
+                            String.format("%s%.1f", sign, cand.scoreCp / 100.0)
+                        }
+                        val movesString = cand.pvLine.take(4).joinToString(" ")
+                        textViews[i]?.text = "#${i + 1} [$scoreText] $movesString"
+                        textViews[i]?.visibility = View.VISIBLE
+                    } else {
+                        textViews[i]?.visibility = View.GONE
+                    }
                 }
             } else {
-                tvLine1.text = "Tidak ada langkah valid"
+                tvLine1?.text = "Tidak ada langkah valid"
+                for (i in 1 until 5) {
+                    textViews[i]?.visibility = View.GONE
+                }
             }
 
-            // Update Mini Board dengan panah rekomendasi
-            setupBoardView?.bestCandidate = candidates.firstOrNull()
+            // Update Mini Board dengan hingga 5 panah rekomendasi
+            setupBoardView?.candidates = candidates
             setupBoardView?.invalidate()
 
-            // Update Panah Cyan Fullscreen di atas aplikasi catur
+            // Update Panah Fullscreen Multi-PV (hingga 5 panah arah berbeda dengan warna unik)
             currentBoardBounds?.let { bounds ->
                 arrowOverlayView?.updateAnalysis(bounds, candidates, emptyList())
             }

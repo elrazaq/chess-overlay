@@ -22,11 +22,7 @@ enum class SetupTool {
 
 /**
  * Mini Papan Catur Interaktif (Mini Map).
- * Berfungsi ganda:
- * 1. Mode Main (isPlayMode = true): Tap petak asal lalu tujuan langsung memainkan langkah legal,
- *    mengubah giliran, dan otomatis mentrigger kalkulasi Stockfish dalam 0.5 detik!
- * 2. Mode Setup (isPlayMode = false): Bebas pasang/hapus/geser anak catur untuk setting posisi midgame/endgame.
- * 3. Menampilkan visual panah langkah terbaik Stockfish langsung di atas mini map!
+ * Menampilkan hingga 5 jalur variasi langkah Stockfish secara bersamaan dengan warna berbeda.
  */
 class SetupBoardView @JvmOverloads constructor(
     context: Context,
@@ -43,7 +39,7 @@ class SetupBoardView @JvmOverloads constructor(
     var activePieceIsWhite: Boolean = true
 
     var selectedSquare: Square? = null
-    var bestCandidate: MoveCandidate? = null
+    var candidates: List<MoveCandidate> = emptyList()
 
     var onMoveMade: ((from: Square, to: Square) -> Boolean)? = null
     var onBoardChanged: (() -> Unit)? = null
@@ -58,7 +54,7 @@ class SetupBoardView @JvmOverloads constructor(
         color = Color.argb(180, 250, 204, 21) // Amber #FACC15
     }
     private val moveCandidateFromPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(140, 56, 189, 248) // Cyan light
+        color = Color.argb(140, 0, 229, 255) // Cyan light
     }
     private val moveCandidateToPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.argb(180, 16, 185, 129) // Emerald target
@@ -66,12 +62,9 @@ class SetupBoardView @JvmOverloads constructor(
     private val miniArrowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeCap = Paint.Cap.ROUND
-        color = Color.parseColor("#38BDF8")
-        strokeWidth = 6f
     }
     private val miniArrowHeadPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
-        color = Color.parseColor("#38BDF8")
     }
     private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
@@ -88,6 +81,14 @@ class SetupBoardView @JvmOverloads constructor(
         textAlign = Paint.Align.CENTER
         setShadowLayer(3f, 0f, 0f, Color.argb(180, 255, 255, 255))
     }
+
+    private val miniRankColors = intArrayOf(
+        Color.parseColor("#00E5FF"), // Rank 1: Cyan
+        Color.parseColor("#F59E0B"), // Rank 2: Amber
+        Color.parseColor("#A855F7"), // Rank 3: Purple
+        Color.parseColor("#3B82F6"), // Rank 4: Blue
+        Color.parseColor("#EC4899")  // Rank 5: Rose
+    )
 
     private val unicodeMapWhite = mapOf(
         PieceType.PAWN to "♙",
@@ -126,12 +127,12 @@ class SetupBoardView @JvmOverloads constructor(
             }
         }
 
-        // 2. Gambar Highlight petak asal & tujuan rekomendasi Stockfish
-        bestCandidate?.let { cand ->
-            val fc = if (isWhiteBottom) cand.from.file else (7 - cand.from.file)
-            val fr = if (isWhiteBottom) (7 - cand.from.rank) else cand.from.rank
-            val tc = if (isWhiteBottom) cand.to.file else (7 - cand.to.file)
-            val tr = if (isWhiteBottom) (7 - cand.to.rank) else cand.to.rank
+        // 2. Gambar Highlight petak asal & tujuan rekomendasi #1
+        candidates.firstOrNull()?.let { best ->
+            val fc = if (isWhiteBottom) best.from.file else (7 - best.from.file)
+            val fr = if (isWhiteBottom) (7 - best.from.rank) else best.from.rank
+            val tc = if (isWhiteBottom) best.to.file else (7 - best.to.file)
+            val tr = if (isWhiteBottom) (7 - best.to.rank) else best.to.rank
 
             canvas.drawRect(fc * sq, fr * sq, (fc + 1) * sq, (fr + 1) * sq, moveCandidateFromPaint)
             canvas.drawRect(tc * sq, tr * sq, (tc + 1) * sq, (tr + 1) * sq, moveCandidateToPaint)
@@ -166,8 +167,10 @@ class SetupBoardView @JvmOverloads constructor(
             }
         }
 
-        // 5. Gambar Panah Rekomendasi Stockfish di Mini Map
-        bestCandidate?.let { cand ->
+        // 5. Gambar hingga 5 Panah Rekomendasi Stockfish di Mini Map
+        val displayCount = candidates.size.coerceAtMost(5)
+        for (idx in (displayCount - 1) downTo 0) {
+            val cand = candidates[idx]
             val fc = if (isWhiteBottom) cand.from.file else (7 - cand.from.file)
             val fr = if (isWhiteBottom) (7 - cand.from.rank) else cand.from.rank
             val tc = if (isWhiteBottom) cand.to.file else (7 - cand.to.file)
@@ -178,10 +181,15 @@ class SetupBoardView @JvmOverloads constructor(
             val tx = (tc + 0.5f) * sq
             val ty = (tr + 0.5f) * sq
 
+            val color = miniRankColors.getOrElse(idx) { Color.CYAN }
+            miniArrowPaint.color = color
+            miniArrowHeadPaint.color = color
+            miniArrowPaint.strokeWidth = if (idx == 0) 6f else 4f
+
             canvas.drawLine(fx, fy, tx, ty, miniArrowPaint)
 
             val angle = Math.atan2((ty - fy).toDouble(), (tx - fx).toDouble())
-            val headLen = sq * 0.32f
+            val headLen = sq * (if (idx == 0) 0.30f else 0.23f)
             val hx1 = (tx - headLen * Math.cos(angle - Math.PI / 6)).toFloat()
             val hy1 = (ty - headLen * Math.sin(angle - Math.PI / 6)).toFloat()
             val hx2 = (tx - headLen * Math.cos(angle + Math.PI / 6)).toFloat()

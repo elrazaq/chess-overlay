@@ -93,17 +93,20 @@
                 android:textSize="10sp"
                 android:visibility="gone" />
 
-            <!-- Hidden dummy lines for multi-pv compatibility -->
             <TextView
                 android:id="@+id/tvLine4"
-                android:layout_width="0dp"
-                android:layout_height="0dp"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="#94A3B8"
+                android:textSize="10sp"
                 android:visibility="gone" />
 
             <TextView
                 android:id="@+id/tvLine5"
-                android:layout_width="0dp"
-                android:layout_height="0dp"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="#94A3B8"
+                android:textSize="10sp"
                 android:visibility="gone" />
         </LinearLayout>
 

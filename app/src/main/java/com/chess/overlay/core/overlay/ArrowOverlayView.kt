@@ -15,7 +15,8 @@ import kotlin.math.sin
 
 /**
  * Custom View untuk:
- * 1. Menggambar panah rekomendasi Stockfish (Cyan elegan seperti di Chess.com/Lichess).
+ * 1. Menggambar hingga 5 panah rekomendasi Stockfish (Multi-PV = 5).
+ *    Setiap peringkat memiliki warna elegan yang berbeda dan badge nomor urut #1 - #5.
  * 2. Menampilkan grid kalibrasi transparan saat memetakan posisi papan.
  * 3. Menghighlight petak yang dipilih saat menggerakkan anak catur secara manual.
  */
@@ -39,17 +40,40 @@ class ArrowOverlayView @JvmOverloads constructor(
     var onSquareTapped: ((Square) -> Unit)? = null
     var onMoveDragged: ((from: Square, to: Square) -> Unit)? = null
 
-    // Paints
-    private val bestMovePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    // Warna untuk 5 variasi jalur terbaik Stockfish:
+    // Rank 1: Cyan / Emerald terang (#00E5FF)
+    // Rank 2: Amber / Emas (#F59E0B)
+    // Rank 3: Ungu / Violet (#A855F7)
+    // Rank 4: Biru / Sky (#3B82F6)
+    // Rank 5: Merah Muda / Rose (#EC4899)
+    private val rankColors = intArrayOf(
+        Color.parseColor("#00E5FF"), // Rank 1
+        Color.parseColor("#F59E0B"), // Rank 2
+        Color.parseColor("#A855F7"), // Rank 3
+        Color.parseColor("#3B82F6"), // Rank 4
+        Color.parseColor("#EC4899")  // Rank 5
+    )
+
+    private val rankAlphas = intArrayOf(240, 215, 195, 180, 165)
+
+    private val dynamicStrokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
-        color = Color.argb(225, 56, 189, 248) // Cyan #38BDF8
     }
 
-    private val bestMoveHeadPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val dynamicHeadPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL_AND_STROKE
-        color = Color.argb(225, 56, 189, 248)
+    }
+
+    private val badgeCirclePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+    }
+
+    private val badgeTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textAlign = Paint.Align.CENTER
+        typeface = Typeface.DEFAULT_BOLD
     }
 
     private val gridBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -66,14 +90,11 @@ class ArrowOverlayView @JvmOverloads constructor(
 
     private val highlightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
-        color = Color.argb(120, 250, 204, 21) // Amber #FACC15
-    }
-
-    private val pieceIndicatorPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.FILL
+        color = Color.argb(130, 250, 204, 21) // Amber #FACC15
     }
 
     private val arrowPath = Path()
+    private var downSquare: Square? = null
 
     fun updateAnalysis(
         bounds: BoardBounds,
@@ -92,7 +113,6 @@ class ArrowOverlayView @JvmOverloads constructor(
         this.selectedSquare = null
         invalidate()
     }
-    private var downSquare: Square? = null
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (!isInputMoveMode) return false
@@ -109,14 +129,12 @@ class ArrowOverlayView @JvmOverloads constructor(
                 downSquare = null
 
                 if (start != null && upSquare != null && start != upSquare) {
-                    // Pengguna menggeser (drag) dari petak asal ke petak tujuan
                     onMoveDragged?.invoke(start, upSquare)
                     invalidate()
                     return true
                 }
 
                 if (upSquare != null) {
-                    // Pengguna men-tap biasa
                     onSquareTapped?.invoke(upSquare)
                     invalidate()
                     return true
@@ -145,11 +163,28 @@ class ArrowOverlayView @JvmOverloads constructor(
             canvas.drawRect(cx - half, cy - half, cx + half, cy + half, highlightPaint)
         }
 
-        // 3. Gambar panah rekomendasi langkah terbaik
-        if (candidates.isNotEmpty()) {
-            val best = candidates.first()
-            val (startX, startY) = bounds.getSquareCenterPixel(best.from)
-            val (endX, endY) = bounds.getSquareCenterPixel(best.to)
+        // 3. Gambar hingga 5 panah rekomendasi langkah Stockfish
+        // Gambar dari rank terendah ke rank 1 agar panah utama #1 berada di lapisan paling atas
+        val displayCount = candidates.size.coerceAtMost(5)
+        for (idx in (displayCount - 1) downTo 0) {
+            val cand = candidates[idx]
+            val (startX, startY) = bounds.getSquareCenterPixel(cand.from)
+            val (endX, endY) = bounds.getSquareCenterPixel(cand.to)
+
+            val baseColor = rankColors.getOrElse(idx) { Color.CYAN }
+            val alpha = rankAlphas.getOrElse(idx) { 160 }
+            val colorWithAlpha = (alpha shl 24) or (baseColor and 0x00FFFFFF)
+
+            dynamicStrokePaint.color = colorWithAlpha
+            dynamicHeadPaint.color = colorWithAlpha
+
+            val shaftFactor = when (idx) {
+                0 -> 0.20f
+                1 -> 0.16f
+                2 -> 0.14f
+                3 -> 0.12f
+                else -> 0.10f
+            }
 
             drawSleekArrow(
                 canvas = canvas,
@@ -157,20 +192,27 @@ class ArrowOverlayView @JvmOverloads constructor(
                 startY = startY,
                 endX = endX,
                 endY = endY,
-                strokePaint = bestMovePaint,
-                headPaint = bestMoveHeadPaint,
-                shaftWidth = bounds.squareSize * 0.22f,
-                headSize = bounds.squareSize * 0.44f
+                strokePaint = dynamicStrokePaint,
+                headPaint = dynamicHeadPaint,
+                shaftWidth = bounds.squareSize * shaftFactor,
+                headSize = bounds.squareSize * (shaftFactor * 2.1f)
             )
+
+            // Tampilkan nomor badge #1 - #5 pada ujung petak tujuan
+            if (displayCount > 1) {
+                val badgeRadius = bounds.squareSize * 0.15f
+                badgeCirclePaint.color = baseColor
+                badgeTextPaint.textSize = badgeRadius * 1.3f
+                canvas.drawCircle(endX, endY, badgeRadius, badgeCirclePaint)
+                canvas.drawText("${idx + 1}", endX, endY + badgeRadius * 0.38f, badgeTextPaint)
+            }
         }
     }
 
     private fun drawMappingGrid(canvas: Canvas, bounds: BoardBounds) {
         val sq = bounds.squareSize
-        // Border luar papan
         canvas.drawRect(bounds.left, bounds.top, bounds.left + bounds.size, bounds.top + bounds.size, gridBorderPaint)
 
-        // Garis-garis petak 8x8
         for (i in 1 until 8) {
             val x = bounds.left + i * sq
             canvas.drawLine(x, bounds.top, x, bounds.top + bounds.size, gridLinePaint)

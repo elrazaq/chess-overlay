@@ -198,6 +198,17 @@ class ChessOverlayService : Service() {
         val btnPlus = view.findViewById<Button>(R.id.btnScalePlus)
         val btnMinus = view.findViewById<Button>(R.id.btnScaleMinus)
 
+        // Mini Board Pad di dalam panel
+        val miniBoard = view.findViewById<com.chess.overlay.core.overlay.MiniBoardView>(R.id.miniBoardView)
+        miniBoard.boardState = boardState
+        miniBoard.isWhiteBottom = isWhiteBottom
+        miniBoard.onMoveExecuted = { from, to ->
+            arrowOverlayView?.clearOverlay()
+            if (isEngineRunning) {
+                calculateStockfishMoves()
+            }
+        }
+
         btnFlip.text = if (isWhiteBottom) "🔄 Putih" else "🔄 Hitam"
 
         // Drag panel via Header
@@ -253,6 +264,7 @@ class ChessOverlayService : Service() {
             val best = currentCandidates.firstOrNull()
             if (best != null) {
                 boardState.makeMove(best.from, best.to)
+                miniBoard.invalidate()
                 Toast.makeText(this, "Langkah diterapkan: ${best.from.toUci()} -> ${best.to.toUci()}", Toast.LENGTH_SHORT).show()
                 if (isEngineRunning) {
                     calculateStockfishMoves()
@@ -264,7 +276,7 @@ class ChessOverlayService : Service() {
             }
         }
 
-        // Mode Input Langkah Manual di Papan
+        // Mode Input Langkah Manual di Papan (Tetap Aktif sampai dimatikan manual)
         btnInput.setOnClickListener {
             enableTouchInputMode(!arrowOverlayView!!.isInputMoveMode)
         }
@@ -275,6 +287,7 @@ class ChessOverlayService : Service() {
                 Toast.makeText(this, "Langkah diurungkan (Undo)", Toast.LENGTH_SHORT).show()
                 sourceSquare = null
                 arrowOverlayView?.selectedSquare = null
+                miniBoard.invalidate()
                 if (isEngineRunning) calculateStockfishMoves()
                 else arrowOverlayView?.clearOverlay()
             }
@@ -285,6 +298,7 @@ class ChessOverlayService : Service() {
             boardState.resetToStartingPosition()
             sourceSquare = null
             arrowOverlayView?.selectedSquare = null
+            miniBoard.invalidate()
             Toast.makeText(this, "32 Bidak catur berhasil dipetakan ke posisi awal!", Toast.LENGTH_SHORT).show()
             if (isEngineRunning) calculateStockfishMoves()
             else arrowOverlayView?.clearOverlay()
@@ -294,6 +308,8 @@ class ChessOverlayService : Service() {
         btnFlip.setOnClickListener {
             isWhiteBottom = !isWhiteBottom
             btnFlip.text = if (isWhiteBottom) "🔄 Putih" else "🔄 Hitam"
+            miniBoard.isWhiteBottom = isWhiteBottom
+            miniBoard.invalidate()
             updateBoardBounds()
             arrowOverlayView?.invalidate()
             if (isEngineRunning) calculateStockfishMoves()
@@ -340,17 +356,15 @@ class ChessOverlayService : Service() {
 
         overlay.isInputMoveMode = enable
         if (enable) {
-            // Hilangkan FLAG_NOT_TOUCHABLE agar petak overlay bisa disentuh
             params.flags = params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
-            btnInput?.text = "❌ Batal Tap"
+            btnInput?.text = "❌ Selesai Tap"
             btnInput?.setBackgroundColor(getColor(R.color.threat_arrow))
-            Toast.makeText(this, "Sentuh bidak asal lalu sentuh petak tujuan", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Tap layar aktif terus menerus. Tap ❌ jika ingin tembus game lagi.", Toast.LENGTH_SHORT).show()
         } else {
-            // Aktifkan kembali FLAG_NOT_TOUCHABLE agar sentuhan tembus ke game catur
             params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
             overlay.selectedSquare = null
             sourceSquare = null
-            btnInput?.text = "🖐️ Tap Gerak"
+            btnInput?.text = "🖐️ Tap Layar"
             btnInput?.setBackgroundColor(android.graphics.Color.TRANSPARENT)
         }
         windowManager?.updateViewLayout(overlay, params)
@@ -358,11 +372,12 @@ class ChessOverlayService : Service() {
     }
 
     /**
-     * Logika sentuhan dua petak (From -> To) saat menggerakkan anak catur secara manual
+     * Logika sentuhan dua petak (From -> To) saat menggerakkan anak catur secara manual di layar besar
      */
     private fun handleSquareTapped(square: Square) {
+        val miniBoard = panelView?.findViewById<com.chess.overlay.core.overlay.MiniBoardView>(R.id.miniBoardView)
+
         if (sourceSquare == null) {
-            // Tap pertama: pilih bidak asal
             val piece = boardState.getPiece(square)
             if (piece != null) {
                 sourceSquare = square
@@ -372,10 +387,8 @@ class ChessOverlayService : Service() {
                 Toast.makeText(this, "Petak ${square.toUci()} kosong", Toast.LENGTH_SHORT).show()
             }
         } else {
-            // Tap kedua: petak tujuan
             val from = sourceSquare!!
             if (from == square) {
-                // Batalkan seleksi
                 sourceSquare = null
                 arrowOverlayView?.selectedSquare = null
                 arrowOverlayView?.invalidate()
@@ -384,9 +397,10 @@ class ChessOverlayService : Service() {
 
             val moved = boardState.makeMove(from, square)
             if (moved) {
-                Toast.makeText(this, "Gerak: ${from.toUci()} -> ${square.toUci()}", Toast.LENGTH_SHORT).show()
-                // Otomatis kembalikan mode tembus layar agar tidak menghalangi
-                enableTouchInputMode(false)
+                sourceSquare = null
+                arrowOverlayView?.selectedSquare = null
+                miniBoard?.invalidate()
+                // TIDAK mematikan mode tap secara otomatis! Tetap aktif agar tidak capek buka-tutup!
 
                 if (isEngineRunning) {
                     calculateStockfishMoves()
@@ -398,6 +412,7 @@ class ChessOverlayService : Service() {
             }
         }
     }
+
 
     /**
      * Menjalankan kalkulasi Stockfish dari posisi FEN resmi BoardState

@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/panelRoot"
-    android:layout_width="330dp"
+    android:layout_width="320dp"
     android:layout_height="wrap_content"
     android:background="@drawable/bg_analysis_card"
     android:orientation="vertical"
-    android:padding="12dp"
+    android:padding="10dp"
     android:elevation="14dp">
 
     <!-- Header bar: Engine Info, Start/Pause & Minimize -->
@@ -61,7 +61,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:background="#151E2E"
-            android:padding="8dp"
+            android:padding="6dp"
             android:orientation="vertical">
 
             <TextView
@@ -106,101 +106,126 @@
                 android:visibility="gone" />
         </LinearLayout>
 
+        <!-- Papan Catur Mini Interaktif (Mirror Board Pad) -->
+        <LinearLayout
+            android:id="@+id/miniBoardContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:layout_marginTop="6dp"
+            android:orientation="vertical">
+
+            <com.chess.overlay.core.overlay.MiniBoardView
+                android:id="@+id/miniBoardView"
+                android:layout_width="190dp"
+                android:layout_height="190dp"
+                android:layout_gravity="center_horizontal"
+                android:elevation="2dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Tap bidak asal lalu tujuan di papan mini ini"
+                android:textColor="#64748B"
+                android:textSize="9sp"
+                android:layout_marginTop="2dp" />
+        </LinearLayout>
+
         <!-- Quick Game Action Bar -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="6dp"
             android:orientation="horizontal">
 
             <Button
                 android:id="@+id/btnApplyBestMove"
                 android:layout_width="0dp"
-                android:layout_height="36dp"
-                android:layout_weight="1.3"
+                android:layout_height="34dp"
+                android:layout_weight="1.4"
                 android:text="✅ Terapkan #1"
                 android:backgroundTint="#0EA5E9"
                 android:textColor="#FFFFFF"
-                android:textSize="11sp"
+                android:textSize="10sp"
                 android:textStyle="bold"
                 android:padding="0dp"
-                android:layout_marginEnd="4dp" />
+                android:layout_marginEnd="3dp" />
 
             <Button
                 android:id="@+id/btnInputManual"
                 style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                 android:layout_width="0dp"
-                android:layout_height="36dp"
+                android:layout_height="34dp"
                 android:layout_weight="1.2"
-                android:text="🖐️ Tap Gerak"
+                android:text="🖐️ Tap Layar"
                 android:textColor="#E2E8F0"
-                android:textSize="10sp"
+                android:textSize="9sp"
                 android:padding="0dp"
-                android:layout_marginEnd="4dp" />
+                android:layout_marginEnd="3dp" />
 
             <Button
                 android:id="@+id/btnUndoMove"
                 style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                 android:layout_width="0dp"
-                android:layout_height="36dp"
+                android:layout_height="34dp"
                 android:layout_weight="0.8"
                 android:text="↩️ Undo"
                 android:textColor="#E2E8F0"
-                android:textSize="10sp"
+                android:textSize="9sp"
                 android:padding="0dp" />
         </LinearLayout>
 
-        <!-- Mass Mapping & Orientation Bar -->
+        <!-- Setup & Kalibrasi Bar -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
+            android:layout_marginTop="4dp"
             android:orientation="horizontal">
 
             <Button
                 android:id="@+id/btnResetBoard"
                 style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                 android:layout_width="0dp"
-                android:layout_height="34dp"
+                android:layout_height="32dp"
                 android:layout_weight="1.3"
                 android:text="♟️ Reset 32 Bidak"
                 android:textColor="#F59E0B"
-                android:textSize="10sp"
+                android:textSize="9sp"
                 android:padding="0dp"
-                android:layout_marginEnd="4dp" />
+                android:layout_marginEnd="3dp" />
 
             <Button
                 android:id="@+id/btnFlipBoard"
                 style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                 android:layout_width="0dp"
-                android:layout_height="34dp"
+                android:layout_height="32dp"
                 android:layout_weight="1"
                 android:text="🔄 Hitam"
                 android:textColor="#E2E8F0"
-                android:textSize="10sp"
+                android:textSize="9sp"
                 android:padding="0dp"
-                android:layout_marginEnd="4dp" />
+                android:layout_marginEnd="3dp" />
 
             <Button
                 android:id="@+id/btnToggleCalibrate"
                 style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                 android:layout_width="0dp"
-                android:layout_height="34dp"
+                android:layout_height="32dp"
                 android:layout_weight="1"
                 android:text="📐 Kalibrasi"
                 android:textColor="#94A3B8"
-                android:textSize="10sp"
+                android:textSize="9sp"
                 android:padding="0dp" />
         </LinearLayout>
 
-        <!-- Calibration Sub-panel (Toggled via Kalibrasi) -->
+        <!-- Calibration Sub-panel -->
         <LinearLayout
             android:id="@+id/calibrationPanel"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:layout_marginTop="6dp"
+            android:layout_marginTop="4dp"
             android:background="#1E293B"
             android:padding="4dp"
             android:visibility="gone">
@@ -208,15 +233,15 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Posisi Papan: "
+                android:text="Atur Papan: "
                 android:textColor="#94A3B8"
                 android:textSize="10sp"
                 android:layout_marginEnd="4dp" />
 
             <Button
                 android:id="@+id/btnMoveUp"
-                android:layout_width="36dp"
-                android:layout_height="32dp"
+                android:layout_width="34dp"
+                android:layout_height="30dp"
                 android:text="⬆️"
                 android:textSize="10sp"
                 android:padding="0dp"
@@ -224,8 +249,8 @@
 
             <Button
                 android:id="@+id/btnMoveDown"
-                android:layout_width="36dp"
-                android:layout_height="32dp"
+                android:layout_width="34dp"
+                android:layout_height="30dp"
                 android:text="⬇️"
                 android:textSize="10sp"
                 android:padding="0dp"
@@ -233,8 +258,8 @@
 
             <Button
                 android:id="@+id/btnScalePlus"
-                android:layout_width="36dp"
-                android:layout_height="32dp"
+                android:layout_width="34dp"
+                android:layout_height="30dp"
                 android:text="➕"
                 android:textSize="10sp"
                 android:padding="0dp"
@@ -242,8 +267,8 @@
 
             <Button
                 android:id="@+id/btnScaleMinus"
-                android:layout_width="36dp"
-                android:layout_height="32dp"
+                android:layout_width="34dp"
+                android:layout_height="30dp"
                 android:text="➖"
                 android:textSize="10sp"
                 android:padding="0dp" />

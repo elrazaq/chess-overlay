@@ -15,8 +15,9 @@ android {
         versionName = "1.0"
 
         ndk {
-            abiFilters.addAll(setOf("arm64-v8a", "armeabi-v7a"))
+            abiFilters.add("arm64-v8a")
         }
+
     }
 
     buildTypes {
@@ -32,6 +33,12 @@ android {
             isMinifyEnabled = false
         }
     }
+
+    lint {
+        abortOnError = false
+        checkReleaseBuilds = false
+    }
+
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

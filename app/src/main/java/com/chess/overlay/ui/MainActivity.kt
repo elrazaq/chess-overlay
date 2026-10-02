@@ -111,7 +111,7 @@ class MainActivity : AppCompatActivity() {
 
         isServiceRunning = true
         btnToggle.text = getString(R.string.btn_stop_service)
-        btnToggle.setBackgroundColor(getColor(R.color.threat_arrow))
+        btnToggle.setBackgroundColor(androidx.core.content.ContextCompat.getColor(this, R.color.threat_arrow))
 
         Toast.makeText(this, "Overlay aktif! Buka aplikasi catur dan klik bubble SCAN", Toast.LENGTH_LONG).show()
         // Minimize app to allow user to open chess app
@@ -123,6 +123,7 @@ class MainActivity : AppCompatActivity() {
         stopService(serviceIntent)
         isServiceRunning = false
         btnToggle.text = getString(R.string.btn_start_service)
-        btnToggle.setBackgroundColor(getColor(R.color.accent))
+        btnToggle.setBackgroundColor(androidx.core.content.ContextCompat.getColor(this, R.color.accent))
     }
 }
+

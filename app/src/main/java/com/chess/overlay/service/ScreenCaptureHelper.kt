@@ -82,11 +82,11 @@ class ScreenCaptureHelper(
     suspend fun captureSnapshot(): Bitmap? = withContext(Dispatchers.Default) {
         var image: Image? = null
         try {
-            // Retry hingga 8 kali (total ~400ms) untuk memastikan frame siap
-            for (attempt in 0..7) {
+            // Coba ambil frame terbaru dengan cepat
+            for (attempt in 0..2) {
                 image = imageReader?.acquireLatestImage()
                 if (image != null) break
-                delay(50)
+                delay(25)
             }
             if (image == null) return@withContext null
 

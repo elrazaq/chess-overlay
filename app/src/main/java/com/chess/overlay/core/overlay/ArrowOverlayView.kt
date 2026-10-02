@@ -92,16 +92,40 @@ class ArrowOverlayView @JvmOverloads constructor(
         invalidate()
     }
 
+    var onSquareTapped: ((Square) -> Unit)? = null
+    var onMoveDragged: ((from: Square, to: Square) -> Unit)? = null
+    private var downSquare: Square? = null
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (!isInputMoveMode) return false
+        val bounds = boardBounds ?: return false
 
-        if (event.action == MotionEvent.ACTION_UP) {
-            val bounds = boardBounds ?: return false
-            val tappedSquare = bounds.getSquareFromPixel(event.x, event.y)
-            if (tappedSquare != null) {
-                onSquareTapped?.invoke(tappedSquare)
-                invalidate()
+        when (event.action) {
+            MotionEvent.ACTION_DOWN -> {
+                downSquare = bounds.getSquareFromPixel(event.x, event.y)
                 return true
+            }
+            MotionEvent.ACTION_UP -> {
+                val upSquare = bounds.getSquareFromPixel(event.x, event.y)
+                val start = downSquare
+                downSquare = null
+
+                if (start != null && upSquare != null && start != upSquare) {
+                    // Pengguna menggeser (drag) dari petak asal ke petak tujuan
+                    onMoveDragged?.invoke(start, upSquare)
+                    invalidate()
+                    return true
+                }
+
+                if (upSquare != null) {
+                    // Pengguna men-tap biasa
+                    onSquareTapped?.invoke(upSquare)
+                    invalidate()
+                    return true
+                }
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                downSquare = null
             }
         }
         return true

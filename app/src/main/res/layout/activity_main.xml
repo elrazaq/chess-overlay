@@ -78,9 +78,28 @@
             android:id="@+id/tvCapturePermissionStatus"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Status Screen Capture: Siap diminta"
+            android:text="Mode Catur: Sinkronisasi Board + Auto-Gesture"
             android:textColor="@color/text_secondary"
             android:textSize="14sp"
+            android:layout_marginTop="6dp" />
+
+        <TextView
+            android:id="@+id/tvAccessibilityStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Status Aksesibilitas: Memeriksa..."
+            android:textColor="@color/text_secondary"
+            android:textSize="14sp"
+            android:layout_marginTop="6dp" />
+
+        <Button
+            android:id="@+id/btnAccessibilitySettings"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="38dp"
+            android:text="Aktifkan Izin Aksesibilitas"
+            android:textColor="@color/accent"
+            android:textSize="11sp"
             android:layout_marginTop="6dp" />
     </LinearLayout>
 

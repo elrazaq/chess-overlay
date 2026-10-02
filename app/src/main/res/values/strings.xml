@@ -10,4 +10,5 @@
     <string name="not_granted">Belum Diizinkan</string>
     <string name="engine_threads">Threads Engine (Default: 1-2 agar ringan)</string>
     <string name="engine_hash">Hash Memory (Default: 16 MB)</string>
+    <string name="accessibility_service_desc">Otomatisasi pergerakan bidak catur di layar untuk Chess Overlay</string>
 </resources>

@@ -43,6 +43,7 @@ class ChessOverlayService : Service() {
     private var isEngineRunning = false
     private var isPanelMinimized = false
     private var isCalibrationVisible = false
+    private var isAutoMoveGestureEnabled = false
 
     // Kalibrasi posisi & ukuran papan
     private var boardTopY = 480f
@@ -145,6 +146,9 @@ class ChessOverlayService : Service() {
             arrowOverlayView?.onSquareTapped = { square ->
                 handleSquareTapped(square)
             }
+            arrowOverlayView?.onMoveDragged = { from, to ->
+                executeMove(from, to)
+            }
 
             wm.addView(arrowOverlayView, arrowLayoutParams)
 
@@ -204,6 +208,7 @@ class ChessOverlayService : Service() {
         miniBoard.isWhiteBottom = isWhiteBottom
         miniBoard.onMoveExecuted = { from, to ->
             arrowOverlayView?.clearOverlay()
+            tryDispatchGestureToGame(from, to)
             if (isEngineRunning) {
                 calculateStockfishMoves()
             }
@@ -263,6 +268,7 @@ class ChessOverlayService : Service() {
         btnApply.setOnClickListener {
             val best = currentCandidates.firstOrNull()
             if (best != null) {
+                tryDispatchGestureToGame(best.from, best.to)
                 boardState.makeMove(best.from, best.to)
                 miniBoard.invalidate()
                 Toast.makeText(this, "Langkah diterapkan: ${best.from.toUci()} -> ${best.to.toUci()}", Toast.LENGTH_SHORT).show()
@@ -273,6 +279,38 @@ class ChessOverlayService : Service() {
                 }
             } else {
                 Toast.makeText(this, "Belum ada rekomendasi langkah", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        // Tombol Auto-Gerak Gesture Injection ke Chess.com
+        val btnAutoMove = view.findViewById<Button>(R.id.btnAutoMove)
+        fun updateAutoMoveUI() {
+            val isA11yRunning = ChessAccessibilityService.isRunning
+            if (!isA11yRunning) {
+                btnAutoMove.text = "⚡ Auto-Gerak di Chess: Izin Nonaktif (Tap)"
+                btnAutoMove.setBackgroundColor(Color.parseColor("#334155"))
+                btnAutoMove.setTextColor(Color.parseColor("#94A3B8"))
+            } else if (isAutoMoveGestureEnabled) {
+                btnAutoMove.text = "⚡ Auto-Gerak di Chess: AKTIF ✓"
+                btnAutoMove.setBackgroundColor(Color.parseColor("#059669"))
+                btnAutoMove.setTextColor(Color.WHITE)
+            } else {
+                btnAutoMove.text = "⚡ Auto-Gerak di Chess: NONAKTIF (Tap)"
+                btnAutoMove.setBackgroundColor(Color.parseColor("#1E293B"))
+                btnAutoMove.setTextColor(Color.parseColor("#38BDF8"))
+            }
+        }
+        updateAutoMoveUI()
+
+        btnAutoMove.setOnClickListener {
+            if (!ChessAccessibilityService.isRunning) {
+                Toast.makeText(this, "Buka Aksesibilitas -> Aktifkan Chess Vision Overlay", Toast.LENGTH_LONG).show()
+                ChessAccessibilityService.openAccessibilitySettings(this)
+            } else {
+                isAutoMoveGestureEnabled = !isAutoMoveGestureEnabled
+                updateAutoMoveUI()
+                val statusStr = if (isAutoMoveGestureEnabled) "AKTIF (Bidak di Chess.com otomatis digerakkan!)" else "NONAKTIF"
+                Toast.makeText(this, "Auto-Gerak: $statusStr", Toast.LENGTH_SHORT).show()
             }
         }
 
@@ -372,11 +410,50 @@ class ChessOverlayService : Service() {
     }
 
     /**
+     * Mengeksekusi pergerakan catur baik dari tap layar penuh, drag jari, atau papan mini
+     */
+    private fun executeMove(from: Square, to: Square): Boolean {
+        val moved = boardState.makeMove(from, to)
+        if (moved) {
+            sourceSquare = null
+            arrowOverlayView?.selectedSquare = null
+            val miniBoard = panelView?.findViewById<com.chess.overlay.core.overlay.MiniBoardView>(R.id.miniBoardView)
+            miniBoard?.invalidate()
+            arrowOverlayView?.invalidate()
+
+            // Injeksi sentuhan/drag ke aplikasi Chess.com secara otomatis jika Auto-Move aktif
+            tryDispatchGestureToGame(from, to)
+
+            if (isEngineRunning) {
+                calculateStockfishMoves()
+            } else {
+                arrowOverlayView?.clearOverlay()
+            }
+            return true
+        }
+        return false
+    }
+
+    /**
+     * Menginjeksi pergerakan menggeser bidak catur ke aplikasi Chess.com via Accessibility Service
+     */
+    private fun tryDispatchGestureToGame(from: Square, to: Square) {
+        if (!isAutoMoveGestureEnabled) return
+        val a11y = ChessAccessibilityService.instance
+        if (a11y == null) {
+            Toast.makeText(this, "Izin Aksesibilitas belum aktif!", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val bounds = currentBoardBounds ?: return
+        val (fromX, fromY) = bounds.getSquareCenterPixel(from)
+        val (toX, toY) = bounds.getSquareCenterPixel(to)
+        a11y.dispatchDrag(fromX, fromY, toX, toY)
+    }
+
+    /**
      * Logika sentuhan dua petak (From -> To) saat menggerakkan anak catur secara manual di layar besar
      */
     private fun handleSquareTapped(square: Square) {
-        val miniBoard = panelView?.findViewById<com.chess.overlay.core.overlay.MiniBoardView>(R.id.miniBoardView)
-
         if (sourceSquare == null) {
             val piece = boardState.getPiece(square)
             if (piece != null) {
@@ -395,17 +472,8 @@ class ChessOverlayService : Service() {
                 return
             }
 
-            val moved = boardState.makeMove(from, square)
-            if (moved) {
-                sourceSquare = null
-                arrowOverlayView?.selectedSquare = null
-                miniBoard?.invalidate()
-                // TIDAK mematikan mode tap secara otomatis! Tetap aktif agar tidak capek buka-tutup!
-
-                if (isEngineRunning) {
-                    calculateStockfishMoves()
-                }
-            } else {
+            val moved = executeMove(from, square)
+            if (!moved) {
                 sourceSquare = null
                 arrowOverlayView?.selectedSquare = null
                 arrowOverlayView?.invalidate()

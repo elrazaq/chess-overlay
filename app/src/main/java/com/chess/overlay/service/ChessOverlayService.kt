@@ -24,12 +24,19 @@ import com.chess.overlay.core.model.BoardState
 import com.chess.overlay.core.model.MoveCandidate
 import com.chess.overlay.core.model.Square
 import com.chess.overlay.core.overlay.ArrowOverlayView
+import com.chess.overlay.core.vision.BoardDetector
+import com.chess.overlay.core.vision.PieceClassifier
 import kotlinx.coroutines.*
 
 class ChessOverlayService : Service() {
 
     private val serviceScope = CoroutineScope(Dispatchers.Main + Job())
     private var windowManager: WindowManager? = null
+
+    // Screen Capture & Vision
+    private var screenCaptureHelper: ScreenCaptureHelper? = null
+    private val boardDetector = BoardDetector()
+    private val pieceClassifier = PieceClassifier()
 
     // Overlay Views
     private var arrowOverlayView: ArrowOverlayView? = null
@@ -102,6 +109,26 @@ class ChessOverlayService : Service() {
         try {
             startForegroundNotification()
             setupOverlayViews()
+
+            val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, Activity.RESULT_CANCELED) ?: Activity.RESULT_CANCELED
+            val resultData: Intent? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                intent?.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                intent?.getParcelableExtra(EXTRA_RESULT_DATA)
+            }
+
+            if (resultCode == Activity.RESULT_OK && resultData != null) {
+                try {
+                    val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                    val projection = projectionManager.getMediaProjection(resultCode, resultData)
+                    if (projection != null) {
+                        screenCaptureHelper = ScreenCaptureHelper(this, projection)
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
         } catch (e: Exception) {
             e.printStackTrace()
             Toast.makeText(this, "Error memulai overlay: ${e.message}", Toast.LENGTH_LONG).show()
@@ -341,6 +368,7 @@ class ChessOverlayService : Service() {
         val btnToggleSetup = view.findViewById<Button>(R.id.btnToggleSetup)
         val setupPanel = view.findViewById<LinearLayout>(R.id.setupPanel)
         val setupBoard = view.findViewById<com.chess.overlay.core.overlay.SetupBoardView>(R.id.setupBoardView)
+        val btnSetupAutoScan = view.findViewById<Button>(R.id.btnSetupAutoScan)
         val btnSetupClear = view.findViewById<Button>(R.id.btnSetupClear)
         val btnSetupDefault32 = view.findViewById<Button>(R.id.btnSetupDefault32)
         val btnSetupTurn = view.findViewById<Button>(R.id.btnSetupTurn)
@@ -367,6 +395,62 @@ class ChessOverlayService : Service() {
             if (isSetupVisible) {
                 setupBoard.isWhiteBottom = isWhiteBottom
                 setupBoard.invalidate()
+            }
+        }
+
+        btnSetupAutoScan.setOnClickListener {
+            val helper = screenCaptureHelper
+            if (helper == null) {
+                Toast.makeText(
+                    this,
+                    "Izin rekam layar belum aktif! Buka aplikasi ChessOverlay dan klik Mulai untuk aktifkan Auto-Scan.",
+                    Toast.LENGTH_LONG
+                ).show()
+                return@setOnClickListener
+            }
+
+            serviceScope.launch {
+                try {
+                    btnSetupAutoScan.text = "⏳ Memindai Layar..."
+                    btnSetupAutoScan.isEnabled = false
+
+                    // Sembunyikan panel sejenak agar screenshot menangkap papan catur bersih di bawahnya
+                    panelView?.visibility = View.INVISIBLE
+                    arrowOverlayView?.visibility = View.INVISIBLE
+                    delay(160)
+
+                    val bitmap = helper.captureSnapshot()
+
+                    panelView?.visibility = View.VISIBLE
+                    arrowOverlayView?.visibility = View.VISIBLE
+
+                    if (bitmap == null) {
+                        Toast.makeText(this@ChessOverlayService, "Gagal menangkap layar. Coba ulangi.", Toast.LENGTH_SHORT).show()
+                        btnSetupAutoScan.text = "📷 Auto Scan Posisi Layar"
+                        btnSetupAutoScan.isEnabled = true
+                        return@launch
+                    }
+
+                    val bounds = currentBoardBounds ?: boardDetector.findBoard(bitmap, isWhiteBottom)
+                    pieceClassifier.scanBoardToBoardState(bitmap, bounds, boardState)
+                    setupBoard.boardState = boardState
+                    setupBoard.invalidate()
+
+                    btnSetupAutoScan.text = "📷 Auto Scan Posisi Layar"
+                    btnSetupAutoScan.isEnabled = true
+                    Toast.makeText(
+                        this@ChessOverlayService,
+                        "Posisi berhasil dipetakan! Periksa di papan mini & sesuaikan jika perlu.",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    panelView?.visibility = View.VISIBLE
+                    arrowOverlayView?.visibility = View.VISIBLE
+                    btnSetupAutoScan.text = "📷 Auto Scan Posisi Layar"
+                    btnSetupAutoScan.isEnabled = true
+                    Toast.makeText(this@ChessOverlayService, "Error auto-scan: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
             }
         }
 
@@ -598,7 +682,15 @@ class ChessOverlayService : Service() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
 
-        startForeground(NOTIFICATION_ID, notification)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
     }
 
     private fun createNotificationChannel() {
@@ -617,6 +709,8 @@ class ChessOverlayService : Service() {
         super.onDestroy()
         serviceScope.cancel()
         stockfishEngine.stop()
+        screenCaptureHelper?.release()
+        screenCaptureHelper = null
 
         panelView?.let { windowManager?.removeView(it) }
         arrowOverlayView?.let { windowManager?.removeView(it) }

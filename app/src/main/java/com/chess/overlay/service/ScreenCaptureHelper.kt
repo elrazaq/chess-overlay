@@ -11,6 +11,7 @@ import android.media.projection.MediaProjection
 import android.util.DisplayMetrics
 import android.view.WindowManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.nio.ByteBuffer
 
@@ -81,7 +82,12 @@ class ScreenCaptureHelper(
     suspend fun captureSnapshot(): Bitmap? = withContext(Dispatchers.Default) {
         var image: Image? = null
         try {
-            image = imageReader?.acquireLatestImage()
+            // Retry hingga 8 kali (total ~400ms) untuk memastikan frame siap
+            for (attempt in 0..7) {
+                image = imageReader?.acquireLatestImage()
+                if (image != null) break
+                delay(50)
+            }
             if (image == null) return@withContext null
 
             val planes = image.planes

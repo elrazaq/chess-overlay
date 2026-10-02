@@ -10,10 +10,14 @@ import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.IBinder
 import android.view.*
+import android.widget.Button
+import android.widget.TextView
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import com.chess.overlay.R
 import com.chess.overlay.core.engine.StockfishBridge
+import com.chess.overlay.core.model.BoardBounds
+import com.chess.overlay.core.model.MoveCandidate
 import com.chess.overlay.core.overlay.ArrowOverlayView
 import com.chess.overlay.core.vision.BoardDetector
 import com.chess.overlay.core.vision.PieceClassifier
@@ -24,15 +28,23 @@ class ChessOverlayService : Service() {
     private val serviceScope = CoroutineScope(Dispatchers.Main + Job())
     private var windowManager: WindowManager? = null
 
-    // View Components
-    private var bubbleView: View? = null
+    // Overlay Views
     private var arrowOverlayView: ArrowOverlayView? = null
+    private var panelView: View? = null
 
-    // Helpers & Engine
+    // Engine & Helpers
     private var screenCaptureHelper: ScreenCaptureHelper? = null
     private val boardDetector = BoardDetector()
     private val pieceClassifier = PieceClassifier()
     private lateinit var stockfishEngine: StockfishBridge
+
+    // State Pengaturan Catur
+    private var isWhiteBottom = false // Default Hitam di bawah (sesuai game yang sedang dimainkan user)
+    private var isWhiteToMove = false // Default giliran Hitam
+    private var isPanelMinimized = false
+    private var lastBoardBounds: BoardBounds? = null
+    private var lastCandidates: List<MoveCandidate> = emptyList()
+    private var lastThreats: List<MoveCandidate> = emptyList()
 
     companion object {
         const val CHANNEL_ID = "ChessOverlayChannel"
@@ -92,7 +104,6 @@ class ChessOverlayService : Service() {
     private fun setupOverlayViews() {
         val wm = windowManager ?: return
 
-        // Periksa izin overlay
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !android.provider.Settings.canDrawOverlays(this)) {
             Toast.makeText(this, "Izin overlay belum aktif!", Toast.LENGTH_LONG).show()
             return
@@ -117,15 +128,17 @@ class ChessOverlayService : Service() {
                 PixelFormat.TRANSLUCENT
             )
 
-            arrowOverlayView = ArrowOverlayView(this)
+            arrowOverlayView = ArrowOverlayView(this).apply {
+                showOnlyBestMove = true // Default 1 panah bersih seperti Image 2
+            }
             wm.addView(arrowOverlayView, arrowParams)
 
-            // 2. Floating Bubble Trigger (Bisa Digeser & Diklik)
+            // 2. Floating Analysis Panel (Mirip Sidebar di Image 2)
             val themedContext = android.view.ContextThemeWrapper(this, R.style.Theme_ChessOverlay)
-            val bubbleInflater = LayoutInflater.from(themedContext)
-            bubbleView = bubbleInflater.inflate(R.layout.floating_bubble, null)
+            val panelInflater = LayoutInflater.from(themedContext)
+            panelView = panelInflater.inflate(R.layout.floating_analysis_panel, null)
 
-            val bubbleParams = WindowManager.LayoutParams(
+            val panelParams = WindowManager.LayoutParams(
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 overlayType,
@@ -133,33 +146,39 @@ class ChessOverlayService : Service() {
                 PixelFormat.TRANSLUCENT
             ).apply {
                 gravity = Gravity.TOP or Gravity.START
-                x = 100
-                y = 300
+                x = 24
+                y = 120
             }
 
-            setupBubbleTouchListener(bubbleParams)
-            wm.addView(bubbleView, bubbleParams)
+            setupPanelTouchAndControls(panelParams)
+            wm.addView(panelView, panelParams)
 
-            // Klik bubble untuk trigger analisis
-            bubbleView?.findViewById<View>(R.id.btnAnalyzeTrigger)?.setOnClickListener {
-                performBoardAnalysis()
-            }
         } catch (e: Exception) {
             e.printStackTrace()
-            Toast.makeText(this, "Gagal menampilkan bubble: ${e.message}", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Gagal memasang overlay: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
+    @SuppressLint("ClickableViewAccessibility", "SetTextI18n")
+    private fun setupPanelTouchAndControls(params: WindowManager.LayoutParams) {
+        val view = panelView ?: return
+        val header = view.findViewById<View>(R.id.panelHeader)
+        val content = view.findViewById<View>(R.id.panelContent)
+        val btnMinimize = view.findViewById<TextView>(R.id.btnToggleMinimize)
+        val btnFlip = view.findViewById<Button>(R.id.btnFlipBoard)
+        val btnTurn = view.findViewById<Button>(R.id.btnToggleTurn)
+        val btnScan = view.findViewById<Button>(R.id.btnScanAction)
 
-    @SuppressLint("ClickableViewAccessibility")
-    private fun setupBubbleTouchListener(params: WindowManager.LayoutParams) {
-        val view = bubbleView ?: return
-        view.setOnTouchListener(object : View.OnTouchListener {
+        // Inisialisasi teks tombol
+        btnFlip.text = if (isWhiteBottom) "🔄 Putih" else "🔄 Hitam"
+        btnTurn.text = if (isWhiteToMove) "⏱️ Giliran: ⚪" else "⏱️ Giliran: ⚫"
+
+        // Drag panel via Header
+        header.setOnTouchListener(object : View.OnTouchListener {
             private var initialX = 0
             private var initialY = 0
             private var initialTouchX = 0f
             private var initialTouchY = 0f
-            private var isMoving = false
 
             override fun onTouch(v: View, event: MotionEvent): Boolean {
                 when (event.action) {
@@ -168,54 +187,109 @@ class ChessOverlayService : Service() {
                         initialY = params.y
                         initialTouchX = event.rawX
                         initialTouchY = event.rawY
-                        isMoving = false
-                        return false // Izinkan click event jika tidak geser
+                        return true
                     }
                     MotionEvent.ACTION_MOVE -> {
-                        val dx = (event.rawX - initialTouchX).toInt()
-                        val dy = (event.rawY - initialTouchY).toInt()
-                        if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
-                            isMoving = true
-                            params.x = initialX + dx
-                            params.y = initialY + dy
-                            windowManager?.updateViewLayout(view, params)
-                            return true
-                        }
-                    }
-                    MotionEvent.ACTION_UP -> {
-                        return isMoving
+                        params.x = initialX + (event.rawX - initialTouchX).toInt()
+                        params.y = initialY + (event.rawY - initialTouchY).toInt()
+                        windowManager?.updateViewLayout(view, params)
+                        return true
                     }
                 }
                 return false
             }
         })
+
+        // Minimize / Expand Panel
+        btnMinimize.setOnClickListener {
+            isPanelMinimized = !isPanelMinimized
+            content.visibility = if (isPanelMinimized) View.GONE else View.VISIBLE
+            btnMinimize.text = if (isPanelMinimized) "▲" else "▼"
+        }
+
+        // Toggle Balik Papan (Putih Bawah / Hitam Bawah)
+        btnFlip.setOnClickListener {
+            isWhiteBottom = !isWhiteBottom
+            btnFlip.text = if (isWhiteBottom) "🔄 Putih" else "🔄 Hitam"
+            lastBoardBounds?.let {
+                val updatedBounds = it.copy(isWhiteBottom = isWhiteBottom)
+                lastBoardBounds = updatedBounds
+                arrowOverlayView?.updateAnalysis(updatedBounds, lastCandidates, lastThreats)
+            }
+            Toast.makeText(this, "Orientasi: ${if (isWhiteBottom) "Putih di bawah" else "Hitam di bawah"}", Toast.LENGTH_SHORT).show()
+        }
+
+        // Toggle Giliran (Putih / Hitam)
+        btnTurn.setOnClickListener {
+            isWhiteToMove = !isWhiteToMove
+            btnTurn.text = if (isWhiteToMove) "⏱️ Giliran: ⚪" else "⏱️ Giliran: ⚫"
+            performBoardAnalysis()
+        }
+
+        // Eksekusi Scan
+        btnScan.setOnClickListener {
+            performBoardAnalysis()
+        }
     }
 
     /**
-     * Pipeline Eksekusi Analisis Papan & Perhitungan 5 Jalur
+     * Pipeline Analisis Papan & Perhitungan 5 Jalur Terbaik
      */
+    @SuppressLint("SetTextI18n")
     private fun performBoardAnalysis() {
         serviceScope.launch {
-            Toast.makeText(this@ChessOverlayService, "Menganalisis papan...", Toast.LENGTH_SHORT).show()
+            val view = panelView ?: return@launch
+            val tvEngineTitle = view.findViewById<TextView>(R.id.tvEngineTitle)
+            val tvLine1 = view.findViewById<TextView>(R.id.tvLine1)
+            val tvLine2 = view.findViewById<TextView>(R.id.tvLine2)
+            val tvLine3 = view.findViewById<TextView>(R.id.tvLine3)
+            val tvLine4 = view.findViewById<TextView>(R.id.tvLine4)
+            val tvLine5 = view.findViewById<TextView>(R.id.tvLine5)
 
-            // 1. Ambil snapshot layar saat ini
+            tvEngineTitle.text = "Menganalisis layar..."
+            tvLine1.text = "Mengambil frame papan..."
+
+            // 1. Ambil snapshot layar
             val bitmap = screenCaptureHelper?.captureSnapshot()
             if (bitmap == null) {
-                Toast.makeText(this@ChessOverlayService, "Gagal mengambil frame layar", Toast.LENGTH_SHORT).show()
+                tvLine1.text = "Gagal mengambil frame layar"
                 return@launch
             }
 
-            // 2. Deteksi bounds papan catur
-            val boardBounds = boardDetector.findBoard(bitmap)
+            // 2. Deteksi batas presisi papan catur
+            val boardBounds = boardDetector.findBoard(bitmap, isWhiteBottom)
+            lastBoardBounds = boardBounds
 
-            // 3. Klasifikasi petak catur ke notasi FEN (Fallback ke standard starting FEN jika demo)
-            val currentFen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
+            // 3. Ekstrak notasi FEN dari gambar petak
+            val detectedFen = pieceClassifier.extractFenFromBoard(bitmap, boardBounds, isWhiteToMove)
 
-            // 4. Jalankan evaluasi 5 jalur terbaik & ancaman via Stockfish
-            val topCandidates = stockfishEngine.analyzeFen(currentFen, moveTimeMs = 600)
-            val threats = stockfishEngine.detectThreats(currentFen)
+            tvEngineTitle.text = "Stockfish 19 • Depth 14 • ${if (isWhiteToMove) "Putih" else "Hitam"}"
 
-            // 5. Gambar panah di overlay canvas secara instan
+            // 4. Hitung 5 jalur terbaik & ancaman via Stockfish
+            val topCandidates = stockfishEngine.analyzeFen(detectedFen, moveTimeMs = 700)
+            val threats = stockfishEngine.detectThreats(detectedFen)
+
+            lastCandidates = topCandidates
+            lastThreats = threats
+
+            // 5. Tampilkan daftar langkah di panel seperti Image 2
+            val textViews = listOf(tvLine1, tvLine2, tvLine3, tvLine4, tvLine5)
+            for (i in 0 until 5) {
+                if (i < topCandidates.size) {
+                    val cand = topCandidates[i]
+                    val scoreText = if (cand.isMate) "M${cand.mateMoves}" else {
+                        val sign = if (cand.scoreCp >= 0) "+" else ""
+                        String.format("%s%.1f", sign, cand.scoreCp / 100.0)
+                    }
+                    val movesString = cand.pvLine.take(4).joinToString(" ")
+                    textViews[i].text = "#${cand.rankOrder}  [$scoreText]  $movesString"
+                    textViews[i].visibility = View.VISIBLE
+                } else {
+                    textViews[i].visibility = View.GONE
+                }
+            }
+
+            // 6. Gambar panah bersih semi-transparan di atas papan catur
             arrowOverlayView?.updateAnalysis(boardBounds, topCandidates, threats)
         }
     }
@@ -224,7 +298,7 @@ class ChessOverlayService : Service() {
         createNotificationChannel()
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Chess Vision Overlay Aktif")
-            .setContentText("Ketuk SCAN pada bubble melayang untuk menghitung 5 jalur terbaik")
+            .setContentText("Panel analisis catur siap digunakan di layar")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
@@ -239,7 +313,6 @@ class ChessOverlayService : Service() {
             startForeground(NOTIFICATION_ID, notification)
         }
     }
-
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -259,7 +332,7 @@ class ChessOverlayService : Service() {
         stockfishEngine.stop()
         screenCaptureHelper?.release()
 
-        bubbleView?.let { windowManager?.removeView(it) }
+        panelView?.let { windowManager?.removeView(it) }
         arrowOverlayView?.let { windowManager?.removeView(it) }
     }
 }

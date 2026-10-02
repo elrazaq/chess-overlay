@@ -138,6 +138,8 @@ class StockfishBridge(
         var mateMoves = 0
         var moveUci = ""
 
+        val pvMoves = mutableListOf<String>()
+
         var i = 0
         while (i < tokens.size) {
             when (tokens[i]) {
@@ -148,7 +150,13 @@ class StockfishBridge(
                     if (i + 1 < tokens.size) mateMoves = tokens[i + 1].toIntOrNull() ?: 0
                 }
                 "pv" -> {
-                    if (i + 1 < tokens.size) moveUci = tokens[i + 1]
+                    for (k in (i + 1) until tokens.size) {
+                        pvMoves.add(tokens[k])
+                    }
+                    if (pvMoves.isNotEmpty()) {
+                        moveUci = pvMoves[0]
+                    }
+                    break
                 }
             }
             i++
@@ -165,8 +173,9 @@ class StockfishBridge(
             scoreCp = scoreCp,
             isMate = isMate,
             mateMoves = mateMoves,
-            pvLine = listOf(moveUci)
+            pvLine = pvMoves
         )
+
     }
 
     private fun getMockCandidates(fen: String): List<MoveCandidate> {

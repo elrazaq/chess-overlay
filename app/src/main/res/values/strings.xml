@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">Chess Vision Overlay</string>
+    <string name="title_app">Chess Engine Overlay</string>
+    <string name="desc_app">Deteksi layar &amp; kalkulasi 5 variasi langkah serta ancaman lawan secara ringan.</string>
+    <string name="btn_start_service">Aktifkan Overlay</string>
+    <string name="btn_stop_service">Hentikan Overlay</string>
+    <string name="status_permission_overlay">Izin Overlay: </string>
+    <string name="status_permission_capture">Izin Tangkapan Layar: </string>
+    <string name="granted">Diizinkan</string>
+    <string name="not_granted">Belum Diizinkan</string>
+    <string name="engine_threads">Threads Engine (Default: 1-2 agar ringan)</string>
+    <string name="engine_hash">Hash Memory (Default: 16 MB)</string>
+</resources>

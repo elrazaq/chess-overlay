@@ -11,18 +11,21 @@ android {
         applicationId = "com.chess.overlay"
         minSdk = 26
         targetSdk = 33
-        versionCode = 7
-        versionName = "1.0.6"
-
-
-
-
-
+        versionCode = 8
+        versionName = "1.0.7"
 
         ndk {
             abiFilters.add("arm64-v8a")
         }
+    }
 
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 
     buildTypes {
@@ -36,6 +39,7 @@ android {
         }
         debug {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 

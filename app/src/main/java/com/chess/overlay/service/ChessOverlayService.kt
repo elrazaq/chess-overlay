@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.app.*
 import android.content.Context
 import android.content.Intent
+import android.graphics.Color
 import android.graphics.PixelFormat
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
@@ -143,10 +144,10 @@ class ChessOverlayService : Service() {
             }
 
             // Handler ketika petak disentuh (Mode Tap Gerak)
-            arrowOverlayView?.onSquareTapped = { square ->
+            arrowOverlayView?.onSquareTapped = { square: Square ->
                 handleSquareTapped(square)
             }
-            arrowOverlayView?.onMoveDragged = { from, to ->
+            arrowOverlayView?.onMoveDragged = { from: Square, to: Square ->
                 executeMove(from, to)
             }
 

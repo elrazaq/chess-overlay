@@ -1,9 +1,6 @@
 package com.chess.overlay.ui
- 
-import android.app.Activity
-import android.content.Context
+
 import android.content.Intent
-import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -25,19 +22,6 @@ class MainActivity : AppCompatActivity() {
 
     private var isServiceRunning = false
 
-    private val screenCaptureLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK && result.data != null) {
-            tvCaptureStatus.text = "Auto Scan: Siap digunakan ✓"
-            startOverlayService(result.resultCode, result.data)
-        } else {
-            Toast.makeText(this, "Izin rekam layar dilewati (hanya setup manual)", Toast.LENGTH_SHORT).show()
-            tvCaptureStatus.text = "Auto Scan: Nonaktif (Hanya setup manual)"
-            startOverlayService(Activity.RESULT_CANCELED, null)
-        }
-    }
-
     private val overlaySettingsLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
@@ -58,7 +42,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        tvCaptureStatus.text = "Mode: Board Sync 100% Akurat (Tanpa Scan Layar)"
+        tvCaptureStatus.text = "Mode: Auto-Alternating Mapping + Jeda Gerak Bebas"
 
         btnToggle.setOnClickListener {
             if (isServiceRunning) {
@@ -102,11 +86,8 @@ class MainActivity : AppCompatActivity() {
         startOverlayService()
     }
 
-    private fun startOverlayService(resultCode: Int = Activity.RESULT_CANCELED, data: Intent? = null) {
-        val serviceIntent = Intent(this, ChessOverlayService::class.java).apply {
-            putExtra(ChessOverlayService.EXTRA_RESULT_CODE, resultCode)
-            putExtra(ChessOverlayService.EXTRA_RESULT_DATA, data)
-        }
+    private fun startOverlayService() {
+        val serviceIntent = Intent(this, ChessOverlayService::class.java)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(serviceIntent)

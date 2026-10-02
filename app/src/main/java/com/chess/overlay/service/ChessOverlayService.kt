@@ -13,6 +13,7 @@ import android.os.IBinder
 import android.util.DisplayMetrics
 import android.view.*
 import android.widget.Button
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.app.NotificationCompat

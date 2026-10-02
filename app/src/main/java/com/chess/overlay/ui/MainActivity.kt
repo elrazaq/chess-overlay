@@ -99,9 +99,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        // Minta izin Screen Capture via MediaProjection untuk fitur Auto-Scan Posisi
-        val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        screenCaptureLauncher.launch(projectionManager.createScreenCaptureIntent())
+        startOverlayService()
     }
 
     private fun startOverlayService(resultCode: Int = Activity.RESULT_CANCELED, data: Intent? = null) {

@@ -1,7 +1,6 @@
 package com.chess.overlay.service
 
 import android.annotation.SuppressLint
-import android.app.Activity
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
@@ -9,7 +8,6 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.PixelFormat
-import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.IBinder
 import android.os.VibrationEffect
@@ -35,7 +33,6 @@ import com.chess.overlay.core.model.Square
 import com.chess.overlay.core.overlay.ArrowOverlayView
 import com.chess.overlay.core.overlay.SetupBoardView
 import com.chess.overlay.core.overlay.SetupTool
-import com.chess.overlay.core.vision.BoardDetector
 import kotlinx.coroutines.*
 
 class ChessOverlayService : Service() {
@@ -43,38 +40,30 @@ class ChessOverlayService : Service() {
     private val serviceScope = CoroutineScope(Dispatchers.Main + Job())
     private var windowManager: WindowManager? = null
 
-    // Screen Capture & Vision
-    private var screenCaptureHelper: ScreenCaptureHelper? = null
-    private val boardDetector = BoardDetector()
-
     // Overlay Views
     private var arrowOverlayView: ArrowOverlayView? = null
     private var panelView: View? = null
     private var arrowLayoutParams: WindowManager.LayoutParams? = null
     private var setupBoardView: SetupBoardView? = null
 
-    // Live Auto-Tracking State
-    private var liveTrackingJob: Job? = null
-    private val lastSquareRgb = IntArray(64)
-    private var hasBaseline = false
-    private var isBoardCalibrated = false
-
-    // Engine & Board State Virtual
+    // Engine & Virtual Board State
     private val boardState = BoardState()
     private lateinit var stockfishEngine: StockfishBridge
+    private var currentCandidates: List<MoveCandidate> = emptyList()
 
-    // Mode Flags
-    private var isWhiteBottom = false // Default Hitam di bawah sesuai preferensi user
+    // Mode & Timer Jeda
     private var isEngineRunning = false
     private var isPanelMinimized = false
     private var isCalibrationVisible = false
-    private var isFullScreenTapActive = false
+    private var isWhiteBottom = false // Default Hitam di bawah (sesuai preferensi user)
+    private var delayDurationSeconds = 3 // Default 3 detik jeda gerak bebas
+    private var countdownJob: Job? = null
+    private var isMappingModeActive = false
 
     // Kalibrasi posisi & ukuran papan
     private var boardTopY = 480f
     private var boardWidth = 1080f
     private var currentBoardBounds: BoardBounds? = null
-    private var currentCandidates: List<MoveCandidate> = emptyList()
 
     // Temporary selection untuk tap gerak manual di layar besar
     private var sourceSquare: Square? = null
@@ -82,8 +71,6 @@ class ChessOverlayService : Service() {
     companion object {
         const val CHANNEL_ID = "ChessOverlayChannel"
         const val NOTIFICATION_ID = 1001
-        const val EXTRA_RESULT_CODE = "extra_result_code"
-        const val EXTRA_RESULT_DATA = "extra_result_data"
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -125,31 +112,10 @@ class ChessOverlayService : Service() {
         try {
             startForegroundNotification()
             setupOverlayViews()
-
-            val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, Activity.RESULT_CANCELED) ?: Activity.RESULT_CANCELED
-            val resultData: Intent? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                intent?.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
-            } else {
-                @Suppress("DEPRECATION")
-                intent?.getParcelableExtra(EXTRA_RESULT_DATA)
-            }
-
-            if (resultCode == Activity.RESULT_OK && resultData != null) {
-                try {
-                    val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-                    val projection = projectionManager.getMediaProjection(resultCode, resultData)
-                    if (projection != null) {
-                        screenCaptureHelper = ScreenCaptureHelper(this, projection)
-                    }
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-            }
         } catch (e: Exception) {
             e.printStackTrace()
             Toast.makeText(this, "Error memulai overlay: ${e.message}", Toast.LENGTH_LONG).show()
         }
-
         return START_NOT_STICKY
     }
 
@@ -171,6 +137,7 @@ class ChessOverlayService : Service() {
             }
 
             // 1. Fullscreen Transparent Arrow Overlay
+            // Default: FLAG_NOT_TOUCHABLE (sentuhan tembus 100% ke game catur)
             arrowLayoutParams = WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.MATCH_PARENT,
@@ -209,7 +176,7 @@ class ChessOverlayService : Service() {
             ).apply {
                 gravity = Gravity.TOP or Gravity.START
                 x = 24
-                y = 90
+                y = 80
             }
 
             setupPanelTouchAndControls(panelParams)
@@ -227,9 +194,30 @@ class ChessOverlayService : Service() {
         val header = view.findViewById<View>(R.id.panelHeader)
         val content = view.findViewById<View>(R.id.panelContent)
         val tvEngineTitle = view.findViewById<TextView>(R.id.tvEngineTitle)
-        val btnToggleTapMode = view.findViewById<Button>(R.id.btnToggleTapMode)
         val btnToggleEngine = view.findViewById<Button>(R.id.btnToggleEngine)
         val btnMinimize = view.findViewById<TextView>(R.id.btnToggleMinimize)
+
+        // Pengatur Jeda Detik
+        val btnDelayMinus = view.findViewById<Button>(R.id.btnDelayMinus)
+        val btnDelayPlus = view.findViewById<Button>(R.id.btnDelayPlus)
+        val tvDelayDuration = view.findViewById<TextView>(R.id.tvDelayDuration)
+        tvDelayDuration.text = "${delayDurationSeconds} dtk"
+
+        btnDelayMinus.setOnClickListener {
+            if (delayDurationSeconds > 1) {
+                delayDurationSeconds--
+                tvDelayDuration.text = "${delayDurationSeconds} dtk"
+                Toast.makeText(this, "Jeda gerak bebas: ${delayDurationSeconds} detik", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        btnDelayPlus.setOnClickListener {
+            if (delayDurationSeconds < 15) {
+                delayDurationSeconds++
+                tvDelayDuration.text = "${delayDurationSeconds} dtk"
+                Toast.makeText(this, "Jeda gerak bebas: ${delayDurationSeconds} detik", Toast.LENGTH_SHORT).show()
+            }
+        }
 
         // Actions
         val btnApply = view.findViewById<Button>(R.id.btnApplyBestMove)
@@ -295,50 +283,32 @@ class ChessOverlayService : Service() {
             btnMinimize.text = if (isPanelMinimized) "▲" else "▼"
         }
 
-        // 1-Tap Toggle: Game Pass-Through vs Fullscreen Tap
-        btnToggleTapMode.setOnClickListener {
-            isFullScreenTapActive = !isFullScreenTapActive
-            enableTouchInputMode(isFullScreenTapActive)
-            if (isFullScreenTapActive) {
-                btnToggleTapMode.text = "🖐️ Tap"
-                btnToggleTapMode.setBackgroundColor(getColor(R.color.threat_arrow))
-                Toast.makeText(this, "Mode Tap Layar Aktif (Sentuh petak langsung di layar)", Toast.LENGTH_SHORT).show()
-            } else {
-                btnToggleTapMode.text = "🎮 Game"
-                btnToggleTapMode.setBackgroundColor(getColor(R.color.accent))
-                Toast.makeText(this, "Mode Game Aktif (Sentuhan tembus ke aplikasi catur)", Toast.LENGTH_SHORT).show()
-            }
-        }
-
-        // Toggle Engine Start / Pause (Live Auto-Tracking)
+        // Toggle START / PAUSE
         btnToggleEngine.setOnClickListener {
             isEngineRunning = !isEngineRunning
             if (isEngineRunning) {
-                btnToggleEngine.text = "🟢 AUTO"
+                // START / RESUME: Masuk ke mode jeda buffer terlebih dahulu
+                btnToggleEngine.text = "⏸️ PAUSE"
                 btnToggleEngine.setBackgroundColor(getColor(R.color.threat_arrow))
-                hasBaseline = false
-                isBoardCalibrated = false
-                startLiveTracking()
                 calculateStockfishMoves()
-                Toast.makeText(this, "Auto-Tracking Aktif! Jalankan catur Anda.", Toast.LENGTH_SHORT).show()
+                startFreeMoveDelay(delayDurationSeconds, isResumeBuffer = true)
+                Toast.makeText(this, "Game Dimulai! Jeda ${delayDurationSeconds}s sebelum mode sentuh overlay.", Toast.LENGTH_SHORT).show()
             } else {
+                // PAUSE: Batalkan timer dan bebaskan sentuhan layar penuh
                 btnToggleEngine.text = "▶️ START"
                 btnToggleEngine.setBackgroundColor(getColor(R.color.accent))
-                stopLiveTracking()
-                tvEngineTitle.text = "Stockfish Dijeda"
-                arrowOverlayView?.clearOverlay()
-                setupBoardView?.bestCandidate = null
-                setupBoardView?.invalidate()
+                pauseGameAndFreeScreen()
+                Toast.makeText(this, "Engine Dijeda (Sentuhan Bebas)", Toast.LENGTH_SHORT).show()
             }
         }
 
-        // Terapkan Rekomendasi #1 Sekali Tap (0.1 Detik)
+        // Terapkan Rekomendasi #1
         btnApply.setOnClickListener {
             val best = currentCandidates.firstOrNull()
             if (best != null) {
                 executeMove(best.from, best.to)
             } else {
-                Toast.makeText(this, "Menunggu kalkulasi Stockfish...", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Menunggu rekomendasi Stockfish...", Toast.LENGTH_SHORT).show()
             }
         }
 
@@ -352,11 +322,8 @@ class ChessOverlayService : Service() {
                 setupBoardView?.bestCandidate = null
                 setupBoardView?.invalidate()
                 arrowOverlayView?.invalidate()
-                if (isEngineRunning) {
-                    calculateStockfishMoves()
-                } else {
-                    arrowOverlayView?.clearOverlay()
-                }
+                enterMappingMode()
+                calculateStockfishMoves()
                 Toast.makeText(this, "Langkah di-undo ↩️", Toast.LENGTH_SHORT).show()
             }
         }
@@ -368,23 +335,21 @@ class ChessOverlayService : Service() {
             setupBoard.isWhiteBottom = isWhiteBottom
             setupBoard.invalidate()
             updateBoardBounds()
-            hasBaseline = false
-            if (isEngineRunning) {
-                calculateStockfishMoves()
-            }
+            calculateStockfishMoves()
             Toast.makeText(this, if (isWhiteBottom) "Perspektif: Putih di bawah" else "Perspektif: Hitam di bawah", Toast.LENGTH_SHORT).show()
         }
 
         // Reset Board ke Posisi Standar 32 Bidak
         btnReset.setOnClickListener {
+            countdownJob?.cancel()
             boardState.resetToStartingPosition()
             setupBoard.selectedSquare = null
             setupBoard.bestCandidate = null
             setupBoard.invalidate()
             arrowOverlayView?.clearOverlay()
-            hasBaseline = false
             if (isEngineRunning) {
                 calculateStockfishMoves()
+                enterMappingMode()
             }
             Toast.makeText(this, "Papan catur direset ke posisi awal (32 bidak)", Toast.LENGTH_SHORT).show()
         }
@@ -431,7 +396,7 @@ class ChessOverlayService : Service() {
         btnSetupTurn.setOnClickListener {
             boardState.isWhiteToMove = !boardState.isWhiteToMove
             btnSetupTurn.text = if (boardState.isWhiteToMove) "Giliran: Putih" else "Giliran: Hitam"
-            if (isEngineRunning) calculateStockfishMoves()
+            calculateStockfishMoves()
         }
 
         btnPieceColorToggle.setOnClickListener {
@@ -502,10 +467,11 @@ class ChessOverlayService : Service() {
             setupBoard.invalidate()
 
             isEngineRunning = true
-            btnToggleEngine.text = "🟢 AUTO"
+            btnToggleEngine.text = "⏸️ PAUSE"
             btnToggleEngine.setBackgroundColor(getColor(R.color.threat_arrow))
             calculateStockfishMoves()
-            Toast.makeText(this, "Posisi disimpan! Stockfish menghitung.", Toast.LENGTH_SHORT).show()
+            enterMappingMode()
+            Toast.makeText(this, "Posisi disimpan! Mode mapping aktif.", Toast.LENGTH_SHORT).show()
         }
 
         // Toggle Calibration Sub-panel
@@ -518,31 +484,95 @@ class ChessOverlayService : Service() {
         btnUp.setOnClickListener {
             boardTopY -= 15f
             updateBoardBounds()
-            if (isEngineRunning) calculateStockfishMoves()
+            calculateStockfishMoves()
         }
         btnDown.setOnClickListener {
             boardTopY += 15f
             updateBoardBounds()
-            if (isEngineRunning) calculateStockfishMoves()
+            calculateStockfishMoves()
         }
         btnPlus.setOnClickListener {
             boardWidth += 15f
             updateBoardBounds()
-            if (isEngineRunning) calculateStockfishMoves()
+            calculateStockfishMoves()
         }
         btnMinus.setOnClickListener {
             boardWidth -= 15f
             updateBoardBounds()
-            if (isEngineRunning) calculateStockfishMoves()
+            calculateStockfishMoves()
         }
     }
 
-    private fun enableTouchInputMode(enable: Boolean) {
+    /**
+     * Memulai jeda waktu gerak bebas (Overlay tembus sentuh 100%).
+     * Dijalankan HANYA setelah langkah legal selesai dilakukan di mode overlay,
+     * atau saat tombol resume ditekan.
+     */
+    @SuppressLint("SetTextI18n")
+    private fun startFreeMoveDelay(seconds: Int, isResumeBuffer: Boolean = false) {
+        countdownJob?.cancel()
+        setOverlayTouchable(false) // Overlay hilang/tembus sentuh agar bebas gerak di aplikasi catur
+        isMappingModeActive = false
+
+        countdownJob = serviceScope.launch {
+            val view = panelView ?: return@launch
+            val tvEngineTitle = view.findViewById<TextView>(R.id.tvEngineTitle)
+
+            for (sec in seconds downTo 1) {
+                if (!isEngineRunning) return@launch
+                val prefix = if (isResumeBuffer) "Persiapan" else "Gerak Bidak!"
+                tvEngineTitle.text = "🎮 $prefix (${sec}s)"
+                delay(1000)
+            }
+
+            if (isEngineRunning) {
+                enterMappingMode()
+            }
+        }
+    }
+
+    /**
+     * Mengaktifkan Mode Mapping (Overlay aktif menangkap tap langkah From -> To).
+     */
+    @SuppressLint("SetTextI18n")
+    private fun enterMappingMode() {
+        if (!isEngineRunning) return
+        countdownJob?.cancel()
+        countdownJob = null
+
+        setOverlayTouchable(true) // Overlay menangkap sentuhan di layar
+        isMappingModeActive = true
+
+        val view = panelView ?: return
+        val tvEngineTitle = view.findViewById<TextView>(R.id.tvEngineTitle)
+        val sideText = if (boardState.isWhiteToMove) "Putih" else "Hitam"
+        tvEngineTitle.text = "🖐️ Giliran $sideText: Tap Petak"
+    }
+
+    /**
+     * Menjeda game dan membebaskan layar dari semua sentuhan overlay.
+     */
+    @SuppressLint("SetTextI18n")
+    private fun pauseGameAndFreeScreen() {
+        countdownJob?.cancel()
+        countdownJob = null
+        isMappingModeActive = false
+        setOverlayTouchable(false) // Tembus sentuhan 100%
+
+        val view = panelView ?: return
+        val tvEngineTitle = view.findViewById<TextView>(R.id.tvEngineTitle)
+        tvEngineTitle.text = "Engine Dijeda (Sentuhan Bebas)"
+    }
+
+    /**
+     * Mengatur apakah Fullscreen Arrow Overlay menangkap sentuhan atau tembus
+     */
+    private fun setOverlayTouchable(touchable: Boolean) {
         val overlay = arrowOverlayView ?: return
         val params = arrowLayoutParams ?: return
 
-        overlay.isInputMoveMode = enable
-        if (enable) {
+        overlay.isInputMoveMode = touchable
+        if (touchable) {
             params.flags = params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
         } else {
             params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
@@ -553,6 +583,11 @@ class ChessOverlayService : Service() {
         overlay.invalidate()
     }
 
+    /**
+     * Mengeksekusi langkah catur legal.
+     * Jika sukses: memperbarui minimap, panah, kalkulasi Stockfish,
+     * lalu otomatis mengaktifkan jeda timer gerak bebas!
+     */
     private fun executeMove(from: Square, to: Square): Boolean {
         val moved = boardState.makeMove(from, to)
         if (moved) {
@@ -563,12 +598,14 @@ class ChessOverlayService : Service() {
             setupBoardView?.invalidate()
             arrowOverlayView?.invalidate()
 
-            if (isEngineRunning) {
-                calculateStockfishMoves()
-            } else {
-                arrowOverlayView?.clearOverlay()
-            }
+            // Hitung rekomendasi langkah berikutnya
+            calculateStockfishMoves()
             vibrateDevice(40)
+
+            // Jeda hanya terjadi jika pergerakan legal berhasil dilakukan
+            if (isEngineRunning) {
+                startFreeMoveDelay(delayDurationSeconds, isResumeBuffer = false)
+            }
             return true
         } else {
             Toast.makeText(this, "Langkah tidak sah!", Toast.LENGTH_SHORT).show()
@@ -610,15 +647,11 @@ class ChessOverlayService : Service() {
     private fun calculateStockfishMoves() {
         serviceScope.launch {
             val view = panelView ?: return@launch
-            val tvEngineTitle = view.findViewById<TextView>(R.id.tvEngineTitle)
             val tvLine1 = view.findViewById<TextView>(R.id.tvLine1)
             val tvLine2 = view.findViewById<TextView>(R.id.tvLine2)
             val tvLine3 = view.findViewById<TextView>(R.id.tvLine3)
 
             val fen = boardState.toFen()
-            val sideText = if (boardState.isWhiteToMove) "Putih" else "Hitam"
-            val boardY = currentBoardBounds?.top?.toInt() ?: 0
-            tvEngineTitle.text = "Stockfish 19 [$sideText | Y=$boardY]"
             tvLine1.text = "#1: Mengkalkulasi..."
 
             val candidates = stockfishEngine.analyzeFen(fen, moveTimeMs = 550)
@@ -663,139 +696,6 @@ class ChessOverlayService : Service() {
         }
     }
 
-    private fun stopLiveTracking() {
-        liveTrackingJob?.cancel()
-        liveTrackingJob = null
-        hasBaseline = false
-        isBoardCalibrated = false
-    }
-
-    private fun startLiveTracking() {
-        stopLiveTracking()
-        liveTrackingJob = serviceScope.launch(Dispatchers.Default) {
-            while (isActive) {
-                delay(320)
-                if (!isEngineRunning) continue
-
-                val helper = screenCaptureHelper ?: continue
-                val bitmap = helper.captureSnapshot() ?: continue
-
-                try {
-                    // Deteksi batas papan nyata dari tangkapan layar jika belum dikalibrasi
-                    if (!isBoardCalibrated) {
-                        val detected = boardDetector.findBoard(bitmap, isWhiteBottom)
-                        currentBoardBounds = detected
-                        isBoardCalibrated = true
-                        withContext(Dispatchers.Main) {
-                            arrowOverlayView?.boardBounds = detected
-                            updateBoardBounds()
-                        }
-                    }
-
-                    val bounds = currentBoardBounds ?: continue
-                    val sq = bounds.squareSize
-                    val currentRgb = IntArray(64)
-
-                    // Hitung rata-rata warna RGB masing-masing 64 petak
-                    for (rank in 0..7) {
-                        for (file in 0..7) {
-                            val col = if (isWhiteBottom) file else (7 - file)
-                            val row = if (isWhiteBottom) (7 - rank) else rank
-
-                            val startX = (bounds.left + col * sq).toInt().coerceIn(0, bitmap.width - 1)
-                            val startY = (bounds.top + row * sq).toInt().coerceIn(0, bitmap.height - 1)
-                            val s = sq.toInt().coerceAtMost(bitmap.width - startX).coerceAtMost(bitmap.height - startY)
-                            if (s <= 10) continue
-
-                            val m = (s * 0.25f).toInt()
-                            var sumR = 0L
-                            var sumG = 0L
-                            var sumB = 0L
-                            var count = 0
-
-                            for (y in m until (s - m) step 2) {
-                                val py = startY + y
-                                if (py >= bitmap.height) continue
-                                for (x in m until (s - m) step 2) {
-                                    val px = startX + x
-                                    if (px >= bitmap.width) continue
-                                    val p = bitmap.getPixel(px, py)
-                                    sumR += (p shr 16) and 0xFF
-                                    sumG += (p shr 8) and 0xFF
-                                    sumB += p and 0xFF
-                                    count++
-                                }
-                            }
-
-                            if (count > 0) {
-                                val avgR = (sumR / count).toInt()
-                                val avgG = (sumG / count).toInt()
-                                val avgB = (sumB / count).toInt()
-                                currentRgb[rank * 8 + file] = (avgR shl 16) or (avgG shl 8) or avgB
-                            }
-                        }
-                    }
-
-                    if (!hasBaseline) {
-                        System.arraycopy(currentRgb, 0, lastSquareRgb, 0, 64)
-                        hasBaseline = true
-                        continue
-                    }
-
-                    // Bandingkan perubahan warna antar frame
-                    val changedSquares = mutableListOf<Square>()
-                    for (rank in 0..7) {
-                        for (file in 0..7) {
-                            val idx = rank * 8 + file
-                            val c1 = currentRgb[idx]
-                            val c2 = lastSquareRgb[idx]
-                            val rDiff = Math.abs(((c1 shr 16) and 0xFF) - ((c2 shr 16) and 0xFF))
-                            val gDiff = Math.abs(((c1 shr 8) and 0xFF) - ((c2 shr 8) and 0xFF))
-                            val bDiff = Math.abs((c1 and 0xFF) - (c2 and 0xFF))
-                            val totalDiff = rDiff + gDiff + bDiff
-
-                            if (totalDiff > 42) {
-                                changedSquares.add(Square(file, rank))
-                            }
-                        }
-                    }
-
-                    if (changedSquares.size in 2..4) {
-                        var validFrom: Square? = null
-                        var validTo: Square? = null
-
-                        for (from in changedSquares) {
-                            val piece = boardState.getPiece(from)
-                            if (piece != null && piece.isWhite == boardState.isWhiteToMove) {
-                                for (to in changedSquares) {
-                                    if (from != to && boardState.isValidMove(from, to)) {
-                                        validFrom = from
-                                        validTo = to
-                                        break
-                                    }
-                                }
-                            }
-                            if (validFrom != null) break
-                        }
-
-                        if (validFrom != null && validTo != null) {
-                            System.arraycopy(currentRgb, 0, lastSquareRgb, 0, 64)
-                            val fromSq = validFrom
-                            val toSq = validTo
-
-                            withContext(Dispatchers.Main) {
-                                executeMove(fromSq, toSq)
-                            }
-                            delay(450)
-                        }
-                    }
-                } finally {
-                    bitmap.recycle()
-                }
-            }
-        }
-    }
-
     private fun vibrateDevice(ms: Long = 40) {
         try {
             val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
@@ -814,7 +714,7 @@ class ChessOverlayService : Service() {
         createNotificationChannel()
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Chess Vision Overlay Aktif")
-            .setContentText("Mini-Map & Analisis Stockfish siap di layar")
+            .setContentText("Mode jeda & auto-mapping catur siap")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
@@ -823,7 +723,7 @@ class ChessOverlayService : Service() {
             startForeground(
                 NOTIFICATION_ID,
                 notification,
-                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
             )
         } else {
             startForeground(NOTIFICATION_ID, notification)
@@ -844,11 +744,9 @@ class ChessOverlayService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        stopLiveTracking()
+        countdownJob?.cancel()
         serviceScope.cancel()
         stockfishEngine.stop()
-        screenCaptureHelper?.release()
-        screenCaptureHelper = null
 
         panelView?.let { windowManager?.removeView(it) }
         arrowOverlayView?.let { windowManager?.removeView(it) }

@@ -8,7 +8,7 @@
     android:padding="8dp"
     android:elevation="14dp">
 
-    <!-- Header bar: Draggable Title, Mode Sentuh Layar, Start/Pause & Minimize -->
+    <!-- Header bar: Title/Status, Start/Pause Button & Minimize -->
     <LinearLayout
         android:id="@+id/panelHeader"
         android:layout_width="match_parent"
@@ -21,38 +21,25 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="Stockfish 19"
+            android:text="Stockfish 19 • Siap"
             android:textColor="#38BDF8"
             android:textSize="11sp"
             android:textStyle="bold"
             android:maxLines="1"
             android:ellipsize="end" />
 
-        <!-- 1-Tap Sentuh: Game Tembus vs Tap Layar Penuh -->
-        <Button
-            android:id="@+id/btnToggleTapMode"
-            android:layout_width="wrap_content"
-            android:layout_height="28dp"
-            android:text="🎮 Game"
-            android:textSize="9sp"
-            android:textStyle="bold"
-            android:backgroundTint="#0284C7"
-            android:textColor="#FFFFFF"
-            android:paddingHorizontal="6dp"
-            android:layout_marginEnd="3dp" />
-
-        <!-- Auto-Tracking Toggle -->
+        <!-- Start / Pause Toggle -->
         <Button
             android:id="@+id/btnToggleEngine"
             android:layout_width="wrap_content"
             android:layout_height="28dp"
-            android:text="🟢 AUTO"
-            android:textSize="9sp"
+            android:text="▶️ START"
+            android:textSize="9.5sp"
             android:textStyle="bold"
             android:backgroundTint="#10B981"
             android:textColor="#FFFFFF"
-            android:paddingHorizontal="6dp"
-            android:layout_marginEnd="2dp" />
+            android:paddingHorizontal="8dp"
+            android:layout_marginEnd="4dp" />
 
         <TextView
             android:id="@+id/btnToggleMinimize"
@@ -85,7 +72,7 @@
                 android:id="@+id/tvLine1"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="#1: Siap..."
+                android:text="#1: Tekan START untuk bermain"
                 android:textColor="#38BDF8"
                 android:textSize="11.5sp"
                 android:textStyle="bold" />
@@ -120,11 +107,57 @@
                 android:visibility="gone" />
         </LinearLayout>
 
+        <!-- Pengaturan Jeda Waktu Gerak Bebas (Default: 3 Detik) -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="4dp"
+            android:paddingVertical="3dp"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="⏳ Jeda Gerak Bebas:"
+                android:textColor="#94A3B8"
+                android:textSize="9.5sp" />
+
+            <Button
+                android:id="@+id/btnDelayMinus"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="26dp"
+                android:layout_height="24dp"
+                android:text="➖"
+                android:textSize="7sp"
+                android:padding="0dp" />
+
+            <TextView
+                android:id="@+id/tvDelayDuration"
+                android:layout_width="32dp"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:text="3 dtk"
+                android:textColor="#38BDF8"
+                android:textSize="10sp"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/btnDelayPlus"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="26dp"
+                android:layout_height="24dp"
+                android:text="➕"
+                android:textSize="7sp"
+                android:padding="0dp" />
+        </LinearLayout>
+
         <!-- MINI BOARD (SELALU AKTIF & TAMPIL DI LAYAR) -->
         <FrameLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
+            android:layout_marginTop="2dp"
             android:layout_marginBottom="4dp">
 
             <com.chess.overlay.core.overlay.SetupBoardView

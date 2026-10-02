@@ -13,3 +13,6 @@ app/build/
 # Ignore large binary in git to keep repo ultra-light (< 1MB) and avoid GitHub file size warnings
 # GitHub Actions will automatically fetch it during build!
 app/src/main/jniLibs/arm64-v8a/libstockfish.so
+
+artifact_*
+

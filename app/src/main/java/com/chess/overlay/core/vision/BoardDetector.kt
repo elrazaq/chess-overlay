@@ -5,9 +5,8 @@ import com.chess.overlay.core.model.BoardBounds
 
 /**
  * Pendeteksi area papan catur yang presisi.
- * Mendeteksi batas atas papan (top) dengan memindai pola petak catur (checkerboard)
- * sehingga posisi panah pas 100% di tengah petak, terlepas dari adanya banner iklan,
- * header aplikasi, atau kotak dialog bot.
+ * Menggunakan analisis transisi 8-kolom horizontal dengan sliding window
+ * untuk menemukan koordinat bujur sangkar 1:1 papan catur secara akurat.
  */
 class BoardDetector {
 
@@ -15,67 +14,48 @@ class BoardDetector {
      * Menemukan batas papan catur pada tangkapan layar.
      */
     fun findBoard(bitmap: Bitmap, isWhiteBottom: Boolean = true): BoardBounds {
-        val width = bitmap.width.toFloat()
-        val height = bitmap.height.toFloat()
+        val width = bitmap.width
+        val height = bitmap.height
+        val boardSize = Math.min(width, height)
 
-        // Papan catur di Android selalu selebar layar (1:1 aspect ratio)
-        val boardSize = width.coerceAtMost(height)
-
-        // Pindai posisi vertikal di mana pola petak catur 8x8 dimulai
-        val detectedTop = detectBoardTop(bitmap, boardSize.toInt())
-
-        return BoardBounds(
-            left = (width - boardSize) / 2f,
-            top = detectedTop.toFloat(),
-            size = boardSize,
-            isWhiteBottom = isWhiteBottom
-        )
-    }
-
-    /**
-     * Memindai layar dari atas ke bawah untuk mendeteksi baris pertama petak catur.
-     */
-    private fun detectBoardTop(bitmap: Bitmap, boardWidth: Int): Int {
-        val w = bitmap.width
-        val h = bitmap.height
-        val sq = (boardWidth / 8).coerceAtLeast(1)
-
-        val minScanY = (h * 0.08).toInt()
-        val maxScanY = (h - boardWidth).coerceAtLeast(minScanY)
-
-        var bestTop = (h - boardWidth) / 2 // Default jika tidak terdeteksi
-        var maxBoardScore = 0
-
-        // Pindai setiap lompatan 4 pixel
-        for (y in minScanY until maxScanY step 4) {
-            val sampleY1 = y + sq / 2
-            val sampleY2 = y + sq + sq / 2
-            if (sampleY2 >= h) break
-
-            var alternations = 0
-            // Periksa kontras warna petak yang berselang-seling pada 4 petak horizontal
-            for (col in 0 until 4) {
-                val x1 = (col + 0.5f) * sq
-                val x2 = (col + 1.5f) * sq
-                if (x2 >= w) break
-
-                val p1 = bitmap.getPixel(x1.toInt(), sampleY1)
-                val p2 = bitmap.getPixel(x2.toInt(), sampleY1)
-
-                val diff = getColorDifference(p1, p2)
-                if (diff > 30) {
-                    alternations++
+        val rowScores = IntArray(height)
+        for (y in 0 until height step 2) {
+            var transitions = 0
+            for (i in 1..7) {
+                val xl = ((i - 0.25f) * boardSize / 8f).toInt().coerceIn(0, width - 1)
+                val xr = ((i + 0.25f) * boardSize / 8f).toInt().coerceIn(0, width - 1)
+                val p1 = bitmap.getPixel(xl, y)
+                val p2 = bitmap.getPixel(xr, y)
+                if (getColorDifference(p1, p2) > 38) {
+                    transitions++
                 }
             }
+            rowScores[y] = transitions
+            if (y + 1 < height) rowScores[y + 1] = transitions
+        }
 
-            if (alternations >= 3) {
-                // Konfirmasi bahwa ini adalah awal dari papan catur
+        var bestTop = (height - boardSize) / 2
+        var bestSum = -1
+        val minY = (height * 0.05f).toInt()
+        val maxY = (height - boardSize).coerceAtLeast(minY)
+
+        for (y in minY until maxY step 2) {
+            var sum = 0
+            for (dy in 0 until boardSize step 4) {
+                sum += rowScores[y + dy]
+            }
+            if (sum > bestSum) {
+                bestSum = sum
                 bestTop = y
-                break
             }
         }
 
-        return bestTop
+        return BoardBounds(
+            left = (width - boardSize) / 2f,
+            top = bestTop.toFloat(),
+            size = boardSize.toFloat(),
+            isWhiteBottom = isWhiteBottom
+        )
     }
 
     private fun getColorDifference(c1: Int, c2: Int): Int {

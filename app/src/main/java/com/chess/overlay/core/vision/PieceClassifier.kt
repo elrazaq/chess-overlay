@@ -4,8 +4,8 @@ import android.graphics.Bitmap
 import com.chess.overlay.core.model.*
 
 /**
- * Klasifikasi bidak catur cerdas berbasis analisis kontur & morfologi piksel.
- * Memetakan seluruh 64 petak secara otomatis ke BoardState & SetupBoardView.
+ * Klasifikasi bidak catur cerdas berbasis analisis kontur & background ratio.
+ * Mencegah false-positive (petak kosong tidak akan dideteksi sebagai bidak).
  */
 class PieceClassifier {
 
@@ -78,58 +78,49 @@ class PieceClassifier {
         startY: Int,
         size: Int
     ): Piece? {
-        val cornerSize = (size * 0.12f).toInt().coerceAtLeast(2)
-        var cornerLumSum = 0
-        var cornerCount = 0
+        val margin = (size * 0.12f).toInt().coerceAtLeast(4)
+        val innerW = size - 2 * margin
+        val innerH = size - 2 * margin
+        if (innerW <= 4 || innerH <= 4) return null
 
-        // 4 Pojok petak (representasi background petak)
-        val cornerOffsets = listOf(
-            Pair(0, 0),
-            Pair(size - cornerSize, 0),
-            Pair(0, size - cornerSize),
-            Pair(size - cornerSize, size - cornerSize)
-        )
+        val grayGrid = Array(innerH) { IntArray(innerW) }
+        val edgeLums = ArrayList<Int>()
 
-        for ((ox, oy) in cornerOffsets) {
-            for (cy in oy until (oy + cornerSize)) {
-                val py = startY + cy
-                if (py >= bitmap.height) continue
-                for (cx in ox until (ox + cornerSize)) {
-                    val px = startX + cx
-                    if (px >= bitmap.width) continue
-                    val p = bitmap.getPixel(px, py)
-                    val lum = ((p shr 16 and 0xFF) * 299 + (p shr 8 and 0xFF) * 587 + (p and 0xFF) * 114) / 1000
-                    cornerLumSum += lum
-                    cornerCount++
+        for (y in 0 until innerH) {
+            val py = (startY + margin + y).coerceIn(0, bitmap.height - 1)
+            for (x in 0 until innerW) {
+                val px = (startX + margin + x).coerceIn(0, bitmap.width - 1)
+                val p = bitmap.getPixel(px, py)
+                val lum = ((p shr 16 and 0xFF) * 299 + (p shr 8 and 0xFF) * 587 + (p and 0xFF) * 114) / 1000
+                grayGrid[y][x] = lum
+                if (y == 0 || y == innerH - 1 || x == 0 || x == innerW - 1) {
+                    edgeLums.add(lum)
                 }
             }
         }
 
-        if (cornerCount == 0) return null
-        val bgLum = cornerLumSum / cornerCount
+        if (edgeLums.isEmpty()) return null
+        edgeLums.sort()
+        val bgLum = edgeLums[edgeLums.size / 2]
 
-        // Pindai area tengah (margin 14% dari pinggir)
-        val margin = (size * 0.14f).toInt()
+        var bgMatchingPixels = 0
+        var totalPixels = 0
         var piecePixels = 0
         var pieceLumSum = 0
-        var minX = size
+        var minX = innerW
         var maxX = 0
-        var minY = size
+        var minY = innerH
         var maxY = 0
         val pieceCoords = ArrayList<Pair<Int, Int>>()
 
-        for (y in margin until (size - margin)) {
-            val py = startY + y
-            if (py >= bitmap.height) continue
-            for (x in margin until (size - margin)) {
-                val px = startX + x
-                if (px >= bitmap.width) continue
-                val p = bitmap.getPixel(px, py)
-                val lum = ((p shr 16 and 0xFF) * 299 + (p shr 8 and 0xFF) * 587 + (p and 0xFF) * 114) / 1000
+        for (y in 0 until innerH) {
+            for (x in 0 until innerW) {
+                val lum = grayGrid[y][x]
+                totalPixels++
                 val diff = Math.abs(lum - bgLum)
-
-                // Jika kontras dengan petak cukup kuat, ini bagian dari bidak
-                if (diff > 25) {
+                if (diff < 20) {
+                    bgMatchingPixels++
+                } else if (diff >= 22) {
                     piecePixels++
                     pieceLumSum += lum
                     pieceCoords.add(Pair(x, y))
@@ -141,20 +132,30 @@ class PieceClassifier {
             }
         }
 
-        val minPieceThreshold = (size * size * 0.07f).toInt()
-        if (piecePixels < minPieceThreshold || minX > maxX || minY > maxY) {
+        // Rasio piksel background: jika >= 85%, petak 100% KOSONG!
+        val bgRatio = bgMatchingPixels.toFloat() / totalPixels
+        if (bgRatio >= 0.85f || piecePixels < (totalPixels * 0.12f) || minX > maxX || minY > maxY) {
             return null
         }
 
-        // Tentukan warna bidak: Putih (terang) atau Hitam (gelap)
-        val avgPieceLum = pieceLumSum / piecePixels
-        val isWhite = avgPieceLum > (bgLum + 10) || avgPieceLum > 155
+        // Deteksi Warna Bidak:
+        val isWhite = if (bgLum > 180) {
+            // Pada petak terang/buff, bidak hitam memiliki banyak piksel sangat gelap (< 100)
+            var darkCount = 0
+            for ((cx, cy) in pieceCoords) {
+                if (grayGrid[cy][cx] < 100) darkCount++
+            }
+            val darkRatio = darkCount.toFloat() / piecePixels
+            darkRatio < 0.25f
+        } else {
+            // Pada petak gelap/hijau, bidak putih jauh lebih terang dari background
+            val avgPieceLum = pieceLumSum.toFloat() / piecePixels
+            avgPieceLum > 130f
+        }
 
-        // Analisis Morfologi
-        val h = maxY - minY + 1
-        val hRatio = h.toFloat() / size
-
-        // Asimetri horizontal (Kuda sangat asimetris)
+        // Morfologi Bentuk Bidak:
+        val ph = maxY - minY + 1
+        val hRatio = ph.toFloat() / innerH
         val midX = (minX + maxX) / 2
         var leftCount = 0
         var rightCount = 0
@@ -164,8 +165,7 @@ class PieceClassifier {
         }
         val asym = Math.abs(leftCount - rightCount).toFloat() / piecePixels
 
-        // Bobot bagian atas (Benteng berkepala datar & lebar)
-        val topYThresh = minY + h * 0.25f
+        val topYThresh = minY + ph * 0.25f
         var topArea = 0
         for ((_, cy) in pieceCoords) {
             if (cy < topYThresh) topArea++
@@ -173,11 +173,11 @@ class PieceClassifier {
         val topRatio = topArea.toFloat() / piecePixels
 
         val pieceType = when {
-            asym > 0.27f -> PieceType.KNIGHT
-            hRatio < 0.65f -> PieceType.PAWN
+            asym > 0.25f -> PieceType.KNIGHT
+            piecePixels < (totalPixels * 0.26f) || hRatio < 0.72f -> PieceType.PAWN
+            topRatio > 0.24f -> PieceType.ROOK
             hRatio > 0.84f -> PieceType.KING
-            topRatio > 0.22f -> PieceType.ROOK
-            hRatio > 0.77f -> PieceType.QUEEN
+            hRatio > 0.78f || topRatio > 0.18f -> PieceType.QUEEN
             else -> PieceType.BISHOP
         }
 

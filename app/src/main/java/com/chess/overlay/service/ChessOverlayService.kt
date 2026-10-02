@@ -414,10 +414,10 @@ class ChessOverlayService : Service() {
                     btnSetupAutoScan.text = "⏳ Memindai Layar..."
                     btnSetupAutoScan.isEnabled = false
 
-                    // Sembunyikan panel sejenak agar screenshot menangkap papan catur bersih di bawahnya
-                    panelView?.visibility = View.INVISIBLE
-                    arrowOverlayView?.visibility = View.INVISIBLE
-                    delay(160)
+                    // Sembunyikan panel agar screenshot menangkap papan catur bersih di bawahnya
+                    panelView?.visibility = View.GONE
+                    arrowOverlayView?.visibility = View.GONE
+                    delay(250) // Beri waktu 250ms agar sistem compositing Android merender frame bersih
 
                     val bitmap = helper.captureSnapshot()
 
@@ -431,8 +431,15 @@ class ChessOverlayService : Service() {
                         return@launch
                     }
 
-                    val bounds = currentBoardBounds ?: boardDetector.findBoard(bitmap, isWhiteBottom)
-                    pieceClassifier.scanBoardToBoardState(bitmap, bounds, boardState)
+                    // Temukan batas presisi papan catur secara otomatis dari screenshot
+                    val detectedBounds = boardDetector.findBoard(bitmap, isWhiteBottom)
+                    currentBoardBounds = detectedBounds
+                    boardTopY = detectedBounds.top
+                    boardWidth = detectedBounds.size
+                    arrowOverlayView?.boardBounds = detectedBounds
+
+                    // Pindai seluruh 64 petak ke boardState menggunakan classifier baru
+                    pieceClassifier.scanBoardToBoardState(bitmap, detectedBounds, boardState)
                     setupBoard.boardState = boardState
                     setupBoard.invalidate()
 

@@ -59,6 +59,15 @@ class StockfishBridge(
             sendCommand("setoption name MultiPV value 5")
             sendCommand("isready")
 
+            // Tunggu hingga Stockfish menjawab readyok agar buffer bersih
+            val startTime = System.currentTimeMillis()
+            while (System.currentTimeMillis() - startTime < 3000) {
+                val line = reader?.readLine() ?: break
+                if (line.contains("readyok")) {
+                    break
+                }
+            }
+
             true
         } catch (e: Exception) {
             e.printStackTrace()
@@ -67,23 +76,34 @@ class StockfishBridge(
     }
 
     private fun sendCommand(cmd: String) {
-        writer?.write("$cmd\n")
-        writer?.flush()
+        try {
+            writer?.write("$cmd\n")
+            writer?.flush()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     /**
      * Menganalisis posisi papan catur dari string FEN.
-     * Mengembalikan hingga 5 variasi langkah terbaik.
+     * Mengembalikan hingga 5 variasi langkah terbaik asli dari Stockfish.
      */
     suspend fun analyzeFen(fen: String, moveTimeMs: Int = 800): List<MoveCandidate> = withContext(Dispatchers.IO) {
         val candidates = mutableMapOf<Int, MoveCandidate>()
 
         if (process == null || writer == null || reader == null) {
-            // Jika binary belum terpasang, berikan fallback mock untuk testing visual overlay
-            return@withContext getMockCandidates(fen)
+            val started = start()
+            if (!started || process == null) {
+                return@withContext emptyList()
+            }
         }
 
         try {
+            // Bersihkan sisa output lama jika ada
+            while (reader?.ready() == true) {
+                reader?.readLine()
+            }
+
             sendCommand("position fen $fen")
             sendCommand("go movetime $moveTimeMs")
 
@@ -103,10 +123,6 @@ class StockfishBridge(
             }
         } catch (e: Exception) {
             e.printStackTrace()
-        }
-
-        if (candidates.isEmpty()) {
-            return@withContext getMockCandidates(fen)
         }
 
         return@withContext candidates.values.sortedBy { it.rankOrder }.take(5)
@@ -182,27 +198,6 @@ class StockfishBridge(
             pvLine = pvMoves
         )
 
-    }
-
-    private fun getMockCandidates(fen: String): List<MoveCandidate> {
-        val isBlack = fen.contains(" b ")
-        return if (isBlack) {
-            listOf(
-                MoveCandidate(1, Square.fromUci("f7"), Square.fromUci("g8"), scoreCp = 45, pvLine = listOf("f7g8", "d4d5")),
-                MoveCandidate(2, Square.fromUci("c6"), Square.fromUci("e5"), scoreCp = 30, pvLine = listOf("c6e5", "d4e5")),
-                MoveCandidate(3, Square.fromUci("d7"), Square.fromUci("d5"), scoreCp = 20, pvLine = listOf("d7d5", "e4d5")),
-                MoveCandidate(4, Square.fromUci("g8"), Square.fromUci("f6"), scoreCp = 15, pvLine = listOf("g8f6", "b1c3")),
-                MoveCandidate(5, Square.fromUci("e7"), Square.fromUci("e6"), scoreCp = 10, pvLine = listOf("e7e6", "g1f3"))
-            )
-        } else {
-            listOf(
-                MoveCandidate(1, Square.fromUci("e2"), Square.fromUci("e4"), scoreCp = 35, pvLine = listOf("e2e4", "e7e5")),
-                MoveCandidate(2, Square.fromUci("d2"), Square.fromUci("d4"), scoreCp = 28, pvLine = listOf("d2d4", "d7d5")),
-                MoveCandidate(3, Square.fromUci("g1"), Square.fromUci("f3"), scoreCp = 25, pvLine = listOf("g1f3", "b8c6")),
-                MoveCandidate(4, Square.fromUci("c2"), Square.fromUci("c4"), scoreCp = 18, pvLine = listOf("c2c4", "c7c5")),
-                MoveCandidate(5, Square.fromUci("b1"), Square.fromUci("c3"), scoreCp = 12, pvLine = listOf("b1c3", "e7e5"))
-            )
-        }
     }
 
 

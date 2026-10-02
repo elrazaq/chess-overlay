@@ -44,7 +44,6 @@ class ChessOverlayService : Service() {
     private var isEngineRunning = false
     private var isPanelMinimized = false
     private var isCalibrationVisible = false
-    private var isAutoMoveGestureEnabled = false
 
     // Kalibrasi posisi & ukuran papan
     private var boardTopY = 480f
@@ -203,18 +202,6 @@ class ChessOverlayService : Service() {
         val btnPlus = view.findViewById<Button>(R.id.btnScalePlus)
         val btnMinus = view.findViewById<Button>(R.id.btnScaleMinus)
 
-        // Mini Board Pad di dalam panel
-        val miniBoard = view.findViewById<com.chess.overlay.core.overlay.MiniBoardView>(R.id.miniBoardView)
-        miniBoard.boardState = boardState
-        miniBoard.isWhiteBottom = isWhiteBottom
-        miniBoard.onMoveExecuted = { from, to ->
-            arrowOverlayView?.clearOverlay()
-            tryDispatchGestureToGame(from, to)
-            if (isEngineRunning) {
-                calculateStockfishMoves()
-            }
-        }
-
         btnFlip.text = if (isWhiteBottom) "🔄 Putih" else "🔄 Hitam"
 
         // Drag panel via Header
@@ -251,17 +238,20 @@ class ChessOverlayService : Service() {
             btnMinimize.text = if (isPanelMinimized) "▲" else "▼"
         }
 
-        // Toggle Engine Start / Pause
+        // Toggle Engine Start / Pause (Sekaligus Men-Trigger Mode Tap Layar!)
         btnToggleEngine.setOnClickListener {
             isEngineRunning = !isEngineRunning
             if (isEngineRunning) {
                 btnToggleEngine.text = "⏸️ PAUSE"
                 btnToggleEngine.setBackgroundColor(getColor(R.color.threat_arrow))
+                enableTouchInputMode(true) // Otomatis aktifkan mode tap layar!
                 calculateStockfishMoves()
             } else {
                 btnToggleEngine.text = "▶️ START"
                 btnToggleEngine.setBackgroundColor(getColor(R.color.accent))
-                tvEngineTitle.text = "Engine Dijeda"
+                enableTouchInputMode(false) // Otomatis tembus pandang ke aplikasi catur!
+                tvEngineTitle.text = "Engine Dijeda (Sentuhan Bebas)"
+                arrowOverlayView?.clearOverlay()
             }
         }
 
@@ -269,9 +259,7 @@ class ChessOverlayService : Service() {
         btnApply.setOnClickListener {
             val best = currentCandidates.firstOrNull()
             if (best != null) {
-                tryDispatchGestureToGame(best.from, best.to)
-                boardState.makeMove(best.from, best.to)
-                miniBoard.invalidate()
+                boardState.makeMove(best.from, best.to, skipValidation = true)
                 Toast.makeText(this, "Langkah diterapkan: ${best.from.toUci()} -> ${best.to.toUci()}", Toast.LENGTH_SHORT).show()
                 if (isEngineRunning) {
                     calculateStockfishMoves()
@@ -283,39 +271,7 @@ class ChessOverlayService : Service() {
             }
         }
 
-        // Tombol Auto-Gerak Gesture Injection ke Chess.com
-        val btnAutoMove = view.findViewById<Button>(R.id.btnAutoMove)
-        fun updateAutoMoveUI() {
-            val isA11yRunning = ChessAccessibilityService.isRunning
-            if (!isA11yRunning) {
-                btnAutoMove.text = "⚡ Auto-Gerak di Chess: Izin Nonaktif (Tap)"
-                btnAutoMove.setBackgroundColor(Color.parseColor("#334155"))
-                btnAutoMove.setTextColor(Color.parseColor("#94A3B8"))
-            } else if (isAutoMoveGestureEnabled) {
-                btnAutoMove.text = "⚡ Auto-Gerak di Chess: AKTIF ✓"
-                btnAutoMove.setBackgroundColor(Color.parseColor("#059669"))
-                btnAutoMove.setTextColor(Color.WHITE)
-            } else {
-                btnAutoMove.text = "⚡ Auto-Gerak di Chess: NONAKTIF (Tap)"
-                btnAutoMove.setBackgroundColor(Color.parseColor("#1E293B"))
-                btnAutoMove.setTextColor(Color.parseColor("#38BDF8"))
-            }
-        }
-        updateAutoMoveUI()
-
-        btnAutoMove.setOnClickListener {
-            if (!ChessAccessibilityService.isRunning) {
-                Toast.makeText(this, "Buka Aksesibilitas -> Aktifkan Chess Vision Overlay", Toast.LENGTH_LONG).show()
-                ChessAccessibilityService.openAccessibilitySettings(this)
-            } else {
-                isAutoMoveGestureEnabled = !isAutoMoveGestureEnabled
-                updateAutoMoveUI()
-                val statusStr = if (isAutoMoveGestureEnabled) "AKTIF (Bidak di Chess.com otomatis digerakkan!)" else "NONAKTIF"
-                Toast.makeText(this, "Auto-Gerak: $statusStr", Toast.LENGTH_SHORT).show()
-            }
-        }
-
-        // Mode Input Langkah Manual di Papan (Tetap Aktif sampai dimatikan manual)
+        // Mode Input Langkah Manual di Papan
         btnInput.setOnClickListener {
             enableTouchInputMode(!arrowOverlayView!!.isInputMoveMode)
         }
@@ -326,7 +282,6 @@ class ChessOverlayService : Service() {
                 Toast.makeText(this, "Langkah diurungkan (Undo)", Toast.LENGTH_SHORT).show()
                 sourceSquare = null
                 arrowOverlayView?.selectedSquare = null
-                miniBoard.invalidate()
                 if (isEngineRunning) calculateStockfishMoves()
                 else arrowOverlayView?.clearOverlay()
             }
@@ -337,7 +292,6 @@ class ChessOverlayService : Service() {
             boardState.resetToStartingPosition()
             sourceSquare = null
             arrowOverlayView?.selectedSquare = null
-            miniBoard.invalidate()
             Toast.makeText(this, "32 Bidak catur berhasil dipetakan ke posisi awal!", Toast.LENGTH_SHORT).show()
             if (isEngineRunning) calculateStockfishMoves()
             else arrowOverlayView?.clearOverlay()
@@ -347,8 +301,6 @@ class ChessOverlayService : Service() {
         btnFlip.setOnClickListener {
             isWhiteBottom = !isWhiteBottom
             btnFlip.text = if (isWhiteBottom) "🔄 Putih" else "🔄 Hitam"
-            miniBoard.isWhiteBottom = isWhiteBottom
-            miniBoard.invalidate()
             updateBoardBounds()
             arrowOverlayView?.invalidate()
             if (isEngineRunning) calculateStockfishMoves()
@@ -396,14 +348,13 @@ class ChessOverlayService : Service() {
         overlay.isInputMoveMode = enable
         if (enable) {
             params.flags = params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
-            btnInput?.text = "❌ Selesai Tap"
+            btnInput?.text = "🖐️ Tap: ON"
             btnInput?.setBackgroundColor(getColor(R.color.threat_arrow))
-            Toast.makeText(this, "Tap layar aktif terus menerus. Tap ❌ jika ingin tembus game lagi.", Toast.LENGTH_SHORT).show()
         } else {
             params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
             overlay.selectedSquare = null
             sourceSquare = null
-            btnInput?.text = "🖐️ Tap Layar"
+            btnInput?.text = "🖐️ Tap: OFF"
             btnInput?.setBackgroundColor(android.graphics.Color.TRANSPARENT)
         }
         windowManager?.updateViewLayout(overlay, params)
@@ -411,19 +362,14 @@ class ChessOverlayService : Service() {
     }
 
     /**
-     * Mengeksekusi pergerakan catur baik dari tap layar penuh, drag jari, atau papan mini
+     * Mengeksekusi pergerakan catur baik dari tap layar penuh atau drag jari
      */
     private fun executeMove(from: Square, to: Square): Boolean {
         val moved = boardState.makeMove(from, to)
         if (moved) {
             sourceSquare = null
             arrowOverlayView?.selectedSquare = null
-            val miniBoard = panelView?.findViewById<com.chess.overlay.core.overlay.MiniBoardView>(R.id.miniBoardView)
-            miniBoard?.invalidate()
             arrowOverlayView?.invalidate()
-
-            // Injeksi sentuhan/drag ke aplikasi Chess.com secara otomatis jika Auto-Move aktif
-            tryDispatchGestureToGame(from, to)
 
             if (isEngineRunning) {
                 calculateStockfishMoves()
@@ -431,24 +377,13 @@ class ChessOverlayService : Service() {
                 arrowOverlayView?.clearOverlay()
             }
             return true
+        } else {
+            Toast.makeText(this, "Langkah tidak sah!", Toast.LENGTH_SHORT).show()
+            sourceSquare = null
+            arrowOverlayView?.selectedSquare = null
+            arrowOverlayView?.invalidate()
+            return false
         }
-        return false
-    }
-
-    /**
-     * Menginjeksi pergerakan menggeser bidak catur ke aplikasi Chess.com via Accessibility Service
-     */
-    private fun tryDispatchGestureToGame(from: Square, to: Square) {
-        if (!isAutoMoveGestureEnabled) return
-        val a11y = ChessAccessibilityService.instance
-        if (a11y == null) {
-            Toast.makeText(this, "Izin Aksesibilitas belum aktif!", Toast.LENGTH_SHORT).show()
-            return
-        }
-        val bounds = currentBoardBounds ?: return
-        val (fromX, fromY) = bounds.getSquareCenterPixel(from)
-        val (toX, toY) = bounds.getSquareCenterPixel(to)
-        a11y.dispatchDrag(fromX, fromY, toX, toY)
     }
 
     /**

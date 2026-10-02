@@ -18,8 +18,6 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var tvOverlayStatus: TextView
     private lateinit var tvCaptureStatus: TextView
-    private lateinit var tvAccessibilityStatus: TextView
-    private lateinit var btnAccessibilitySettings: Button
     private lateinit var btnToggle: Button
 
     private var isServiceRunning = false
@@ -36,13 +34,7 @@ class MainActivity : AppCompatActivity() {
 
         tvOverlayStatus = findViewById(R.id.tvOverlayPermissionStatus)
         tvCaptureStatus = findViewById(R.id.tvCapturePermissionStatus)
-        tvAccessibilityStatus = findViewById(R.id.tvAccessibilityStatus)
-        btnAccessibilitySettings = findViewById(R.id.btnAccessibilitySettings)
         btnToggle = findViewById(R.id.btnToggleService)
-
-        btnAccessibilitySettings.setOnClickListener {
-            com.chess.overlay.service.ChessAccessibilityService.openAccessibilitySettings(this)
-        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
@@ -50,7 +42,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        tvCaptureStatus.text = "Mode Catur: Sinkronisasi Board + Auto-Gesture"
+        tvCaptureStatus.text = "Mode: Board Sync 100% Akurat (Tanpa Scan Layar)"
 
         btnToggle.setOnClickListener {
             if (isServiceRunning) {
@@ -77,15 +69,6 @@ class MainActivity : AppCompatActivity() {
             "Status Izin Overlay: Diizinkan ✓"
         } else {
             "Status Izin Overlay: Belum Diizinkan (Ketuk tombol di bawah)"
-        }
-
-        val hasA11y = com.chess.overlay.service.ChessAccessibilityService.isAccessibilityServiceEnabled(this)
-        if (hasA11y) {
-            tvAccessibilityStatus.text = "Status Aksesibilitas (Auto-Gerak): Aktif ✓"
-            btnAccessibilitySettings.visibility = android.view.View.GONE
-        } else {
-            tvAccessibilityStatus.text = "Status Aksesibilitas (Auto-Gerak): Belum Aktif (Opsional)"
-            btnAccessibilitySettings.visibility = android.view.View.VISIBLE
         }
     }
 

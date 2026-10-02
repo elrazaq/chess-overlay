@@ -88,9 +88,95 @@ class BoardState {
     }
 
     /**
+     * Memvalidasi apakah pergerakan anak catur sah sesuai aturan catur.
+     * Mencegah langkah ilegal (seperti pion jalan mundur atau langkah hantu).
+     */
+    fun isValidMove(from: Square, to: Square): Boolean {
+        if (from == to) return false
+        val fromRow = 7 - from.rank
+        val fromCol = from.file
+        val toRow = 7 - to.rank
+        val toCol = to.file
+
+        val piece = grid[fromRow][fromCol] ?: return false
+        val dest = grid[toRow][toCol]
+
+        // Tidak boleh memakan anak catur sendiri
+        if (dest != null && dest.isWhite == piece.isWhite) return false
+
+        val dCol = to.file - from.file
+        val dRank = to.rank - from.rank
+        val absDCol = Math.abs(dCol)
+        val absDRank = Math.abs(dRank)
+
+        when (piece.type) {
+            PieceType.PAWN -> {
+                val forward = if (piece.isWhite) 1 else -1
+                val startRank = if (piece.isWhite) 1 else 6
+
+                if (dCol == 0) {
+                    // Maju 1 petak ke depan (petak tujuan harus kosong)
+                    if (dRank == forward && dest == null) return true
+                    // Maju 2 petak dari baris awal pion
+                    if (from.rank == startRank && dRank == forward * 2 && dest == null) {
+                        val midRow = 7 - (from.rank + forward)
+                        if (grid[midRow][fromCol] == null) return true
+                    }
+                } else if (absDCol == 1 && dRank == forward) {
+                    // Makan diagonal (harus ada bidak lawan)
+                    if (dest != null && dest.isWhite != piece.isWhite) return true
+                }
+                return false
+            }
+            PieceType.KNIGHT -> {
+                return (absDCol == 1 && absDRank == 2) || (absDCol == 2 && absDRank == 1)
+            }
+            PieceType.BISHOP -> {
+                if (absDCol != absDRank) return false
+                return isPathClear(fromRow, fromCol, toRow, toCol)
+            }
+            PieceType.ROOK -> {
+                if (dCol != 0 && dRank != 0) return false
+                return isPathClear(fromRow, fromCol, toRow, toCol)
+            }
+            PieceType.QUEEN -> {
+                if (absDCol != absDRank && dCol != 0 && dRank != 0) return false
+                return isPathClear(fromRow, fromCol, toRow, toCol)
+            }
+            PieceType.KING -> {
+                if (absDCol <= 1 && absDRank <= 1) return true
+                // Rokade
+                if (absDRank == 0 && absDCol == 2) {
+                    val row = fromRow
+                    if (to.file == 6 && grid[row][5] == null && grid[row][6] == null) return true
+                    if (to.file == 2 && grid[row][1] == null && grid[row][2] == null && grid[row][3] == null) return true
+                }
+                return false
+            }
+        }
+    }
+
+    private fun isPathClear(fromRow: Int, fromCol: Int, toRow: Int, toCol: Int): Boolean {
+        val stepRow = Integer.signum(toRow - fromRow)
+        val stepCol = Integer.signum(toCol - fromCol)
+        var currRow = fromRow + stepRow
+        var currCol = fromCol + stepCol
+        while (currRow != toRow || currCol != toCol) {
+            if (grid[currRow][currCol] != null) return false
+            currRow += stepRow
+            currCol += stepCol
+        }
+        return true
+    }
+
+    /**
      * Menggerakkan anak catur secara manual atau sesuai rekomendasi engine.
      */
-    fun makeMove(from: Square, to: Square): Boolean {
+    fun makeMove(from: Square, to: Square, skipValidation: Boolean = false): Boolean {
+        if (!skipValidation && !isValidMove(from, to)) {
+            return false
+        }
+
         val fromRow = 7 - from.rank
         val fromCol = from.file
         val toRow = 7 - to.rank

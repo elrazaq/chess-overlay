@@ -4,6 +4,8 @@ import android.content.Context
 import com.chess.overlay.core.model.MoveCandidate
 import com.chess.overlay.core.model.Square
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import java.io.BufferedReader
 import java.io.File
@@ -88,10 +90,10 @@ class StockfishBridge(
      * Menganalisis posisi papan catur dari string FEN.
      * Mengembalikan hingga 5 variasi langkah terbaik asli dari Stockfish.
      */
-    suspend fun analyzeFen(fen: String, moveTimeMs: Int = 800): List<MoveCandidate> = withContext(Dispatchers.IO) {
+    suspend fun analyzeFen(fen: String, moveTimeMs: Int = 600): List<MoveCandidate> = withContext(Dispatchers.IO) {
         val candidates = mutableMapOf<Int, MoveCandidate>()
 
-        if (process == null || writer == null || reader == null) {
+        if (process == null || process?.isAlive != true || writer == null || reader == null) {
             val started = start()
             if (!started || process == null) {
                 return@withContext emptyList()
@@ -107,22 +109,37 @@ class StockfishBridge(
             sendCommand("position fen $fen")
             sendCommand("go movetime $moveTimeMs")
 
-            var line: String?
-            while (reader?.readLine().also { line = it } != null) {
-                val currentLine = line ?: break
-                if (currentLine.startsWith("bestmove")) {
-                    break
-                }
+            val startTime = System.currentTimeMillis()
+            val maxWaitMs = moveTimeMs + 700L
 
-                if (currentLine.startsWith("info ") && currentLine.contains("multipv")) {
-                    val candidate = parseUciInfoLine(currentLine)
-                    if (candidate != null) {
-                        candidates[candidate.rankOrder] = candidate
+            // Loop pembacaan dengan batas waktu agar tidak pernah macet jika terjadi eror
+            while (isActive && System.currentTimeMillis() - startTime < maxWaitMs) {
+                if (reader?.ready() == true) {
+                    val line = reader?.readLine() ?: break
+                    if (line.startsWith("bestmove")) {
+                        break
                     }
+
+                    if (line.startsWith("info ") && line.contains("multipv")) {
+                        val candidate = parseUciInfoLine(line)
+                        if (candidate != null) {
+                            candidates[candidate.rankOrder] = candidate
+                        }
+                    }
+                } else {
+                    delay(20)
                 }
+            }
+
+            // Hentikan kalkulasi jika telah melewati batas waktu
+            if (System.currentTimeMillis() - startTime >= maxWaitMs) {
+                sendCommand("stop")
             }
         } catch (e: Exception) {
             e.printStackTrace()
+            try {
+                start()
+            } catch (_: Exception) {}
         }
 
         return@withContext candidates.values.sortedBy { it.rankOrder }.take(5)

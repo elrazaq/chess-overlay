@@ -140,8 +140,174 @@ class BoardState {
     }
 
     /**
-     * Memvalidasi apakah pergerakan anak catur sah sesuai aturan catur.
-     * Mencegah langkah ilegal (seperti pion jalan mundur atau langkah hantu).
+     * Memeriksa apakah suatu petak sedang diserang oleh bidak lawan.
+     */
+    fun isSquareAttacked(square: Square, attackedByWhite: Boolean): Boolean {
+        val targetRow = 7 - square.rank
+        val targetCol = square.file
+
+        // 1. Serangan Pion
+        val pawnAttackerRow = if (attackedByWhite) targetRow + 1 else targetRow - 1
+        if (pawnAttackerRow in 0..7) {
+            val leftCol = targetCol - 1
+            val rightCol = targetCol + 1
+            if (leftCol in 0..7) {
+                val p = grid[pawnAttackerRow][leftCol]
+                if (p?.type == PieceType.PAWN && p.isWhite == attackedByWhite) return true
+            }
+            if (rightCol in 0..7) {
+                val p = grid[pawnAttackerRow][rightCol]
+                if (p?.type == PieceType.PAWN && p.isWhite == attackedByWhite) return true
+            }
+        }
+
+        // 2. Serangan Kuda (8 arah L)
+        val knightOffsets = arrayOf(
+            Pair(-2, -1), Pair(-2, 1), Pair(-1, -2), Pair(-1, 2),
+            Pair(1, -2), Pair(1, 2), Pair(2, -1), Pair(2, 1)
+        )
+        for ((dr, dc) in knightOffsets) {
+            val r = targetRow + dr
+            val c = targetCol + dc
+            if (r in 0..7 && c in 0..7) {
+                val p = grid[r][c]
+                if (p?.type == PieceType.KNIGHT && p.isWhite == attackedByWhite) return true
+            }
+        }
+
+        // 3. Serangan Raja (1 petak di sekelilingnya)
+        for (dr in -1..1) {
+            for (dc in -1..1) {
+                if (dr == 0 && dc == 0) continue
+                val r = targetRow + dr
+                val c = targetCol + dc
+                if (r in 0..7 && c in 0..7) {
+                    val p = grid[r][c]
+                    if (p?.type == PieceType.KING && p.isWhite == attackedByWhite) return true
+                }
+            }
+        }
+
+        // 4. Serangan Garis Lurus (Benteng / Ratu)
+        val straightDirs = arrayOf(Pair(-1, 0), Pair(1, 0), Pair(0, -1), Pair(0, 1))
+        for ((dr, dc) in straightDirs) {
+            var r = targetRow + dr
+            var c = targetCol + dc
+            while (r in 0..7 && c in 0..7) {
+                val p = grid[r][c]
+                if (p != null) {
+                    if (p.isWhite == attackedByWhite && (p.type == PieceType.ROOK || p.type == PieceType.QUEEN)) {
+                        return true
+                    }
+                    break // Jalur terhalang oleh bidak lain
+                }
+                r += dr
+                c += dc
+            }
+        }
+
+        // 5. Serangan Diagonal (Gajah / Ratu)
+        val diagDirs = arrayOf(Pair(-1, -1), Pair(-1, 1), Pair(1, -1), Pair(1, 1))
+        for ((dr, dc) in diagDirs) {
+            var r = targetRow + dr
+            var c = targetCol + dc
+            while (r in 0..7 && c in 0..7) {
+                val p = grid[r][c]
+                if (p != null) {
+                    if (p.isWhite == attackedByWhite && (p.type == PieceType.BISHOP || p.type == PieceType.QUEEN)) {
+                        return true
+                    }
+                    break // Jalur terhalang oleh bidak lain
+                }
+                r += dr
+                c += dc
+            }
+        }
+
+        return false
+    }
+
+    /**
+     * Memeriksa apakah Raja suatu warna sedang dalam posisi SKAK (check).
+     */
+    fun isKingInCheck(isWhite: Boolean): Boolean {
+        var kingSquare: Square? = null
+        for (r in 0 until 8) {
+            for (c in 0 until 8) {
+                val p = grid[r][c]
+                if (p?.type == PieceType.KING && p.isWhite == isWhite) {
+                    kingSquare = Square(c, 7 - r)
+                    break
+                }
+            }
+            if (kingSquare != null) break
+        }
+        val target = kingSquare ?: return false
+        return isSquareAttacked(target, attackedByWhite = !isWhite)
+    }
+
+    /**
+     * Memeriksa apakah pergerakan geometri dasar bidak sah (tanpa mempertimbangkan skak pada raja).
+     */
+    private fun canPieceMove(from: Square, to: Square, piece: Piece, dest: Piece?): Boolean {
+        val fromRow = 7 - from.rank
+        val fromCol = from.file
+        val toRow = 7 - to.rank
+        val toCol = to.file
+
+        val dCol = to.file - from.file
+        val dRank = to.rank - from.rank
+        val absDCol = Math.abs(dCol)
+        val absDRank = Math.abs(dRank)
+
+        return when (piece.type) {
+            PieceType.PAWN -> {
+                val forward = if (piece.isWhite) 1 else -1
+                val startRank = if (piece.isWhite) 1 else 6
+
+                if (dCol == 0) {
+                    if (dRank == forward && dest == null) true
+                    else if (from.rank == startRank && dRank == forward * 2 && dest == null) {
+                        val midRow = 7 - (from.rank + forward)
+                        grid[midRow][fromCol] == null
+                    } else false
+                } else if (absDCol == 1 && dRank == forward) {
+                    dest != null && dest.isWhite != piece.isWhite
+                } else false
+            }
+            PieceType.KNIGHT -> {
+                (absDCol == 1 && absDRank == 2) || (absDCol == 2 && absDRank == 1)
+            }
+            PieceType.BISHOP -> {
+                if (absDCol != absDRank) false
+                else isPathClear(fromRow, fromCol, toRow, toCol)
+            }
+            PieceType.ROOK -> {
+                if (dCol != 0 && dRank != 0) false
+                else isPathClear(fromRow, fromCol, toRow, toCol)
+            }
+            PieceType.QUEEN -> {
+                if (absDCol != absDRank && dCol != 0 && dRank != 0) false
+                else isPathClear(fromRow, fromCol, toRow, toCol)
+            }
+            PieceType.KING -> {
+                if (absDCol <= 1 && absDRank <= 1) true
+                else if (absDRank == 0 && absDCol == 2) {
+                    val row = fromRow
+                    if (to.file == 6 && grid[row][5] == null && grid[row][6] == null) true
+                    else to.file == 2 && grid[row][1] == null && grid[row][2] == null && grid[row][3] == null
+                } else false
+            }
+        }
+    }
+
+    /**
+     * Memvalidasi apakah pergerakan anak catur 100% legal sesuai aturan catur resmi:
+     * 1. Harus giliran warna yang sedang aktif.
+     * 2. Tidak memakan bidak kawan sendiri.
+     * 3. Sesuai geometri langkah bidak.
+     * 4. Rokade tidak boleh saat diskak atau melewati petak yang diskak.
+     * 5. Raja sendiri TIDAK BOLEH dalam posisi skak setelah langkah dilakukan (mencegah langkah ilegal / pin).
      */
     fun isValidMove(from: Square, to: Square): Boolean {
         if (from == to) return false
@@ -153,59 +319,35 @@ class BoardState {
         val piece = grid[fromRow][fromCol] ?: return false
         val dest = grid[toRow][toCol]
 
-        // Tidak boleh memakan anak catur sendiri
+        // 1. Wajib giliran warna yang sedang aktif!
+        if (piece.isWhite != isWhiteToMove) return false
+
+        // 2. Tidak boleh memakan anak catur sendiri
         if (dest != null && dest.isWhite == piece.isWhite) return false
 
-        val dCol = to.file - from.file
-        val dRank = to.rank - from.rank
-        val absDCol = Math.abs(dCol)
-        val absDRank = Math.abs(dRank)
+        // 3. Cek geometri langkah bidak
+        if (!canPieceMove(from, to, piece, dest)) return false
 
-        when (piece.type) {
-            PieceType.PAWN -> {
-                val forward = if (piece.isWhite) 1 else -1
-                val startRank = if (piece.isWhite) 1 else 6
-
-                if (dCol == 0) {
-                    // Maju 1 petak ke depan (petak tujuan harus kosong)
-                    if (dRank == forward && dest == null) return true
-                    // Maju 2 petak dari baris awal pion
-                    if (from.rank == startRank && dRank == forward * 2 && dest == null) {
-                        val midRow = 7 - (from.rank + forward)
-                        if (grid[midRow][fromCol] == null) return true
-                    }
-                } else if (absDCol == 1 && dRank == forward) {
-                    // Makan diagonal (harus ada bidak lawan)
-                    if (dest != null && dest.isWhite != piece.isWhite) return true
-                }
-                return false
-            }
-            PieceType.KNIGHT -> {
-                return (absDCol == 1 && absDRank == 2) || (absDCol == 2 && absDRank == 1)
-            }
-            PieceType.BISHOP -> {
-                if (absDCol != absDRank) return false
-                return isPathClear(fromRow, fromCol, toRow, toCol)
-            }
-            PieceType.ROOK -> {
-                if (dCol != 0 && dRank != 0) return false
-                return isPathClear(fromRow, fromCol, toRow, toCol)
-            }
-            PieceType.QUEEN -> {
-                if (absDCol != absDRank && dCol != 0 && dRank != 0) return false
-                return isPathClear(fromRow, fromCol, toRow, toCol)
-            }
-            PieceType.KING -> {
-                if (absDCol <= 1 && absDRank <= 1) return true
-                // Rokade
-                if (absDRank == 0 && absDCol == 2) {
-                    val row = fromRow
-                    if (to.file == 6 && grid[row][5] == null && grid[row][6] == null) return true
-                    if (to.file == 2 && grid[row][1] == null && grid[row][2] == null && grid[row][3] == null) return true
-                }
+        // 4. Aturan Khusus Rokade: Raja tidak boleh sedang diskak dan tidak boleh melewati petak yang diserang
+        if (piece.type == PieceType.KING && Math.abs(to.file - from.file) == 2) {
+            if (isKingInCheck(piece.isWhite)) return false
+            val throughFile = if (to.file == 6) 5 else 3
+            if (isSquareAttacked(Square(throughFile, from.rank), attackedByWhite = !piece.isWhite)) {
                 return false
             }
         }
+
+        // 5. Simulasikan langkah untuk memastikan Raja sendiri tidak berakhir dalam kondisi SKAK
+        grid[toRow][toCol] = piece
+        grid[fromRow][fromCol] = null
+
+        val leavesKingInCheck = isKingInCheck(piece.isWhite)
+
+        // Kembalikan ke posisi awal (revert simulation)
+        grid[fromRow][fromCol] = piece
+        grid[toRow][toCol] = dest
+
+        return !leavesKingInCheck
     }
 
     private fun isPathClear(fromRow: Int, fromCol: Int, toRow: Int, toCol: Int): Boolean {

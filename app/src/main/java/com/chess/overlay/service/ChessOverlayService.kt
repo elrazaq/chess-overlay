@@ -676,7 +676,9 @@ class ChessOverlayService : Service() {
                     }
                 }
             } else {
-                tvLine1?.text = "Tidak ada langkah valid"
+                val inCheck = boardState.isKingInCheck(boardState.isWhiteToMove)
+                val statusText = if (inCheck) "#1: [Skakmat] Posisi Selesai" else "#1: [Remis] Tidak Ada Langkah"
+                tvLine1?.text = statusText
                 for (i in 1 until 5) {
                     textViews[i]?.visibility = View.GONE
                 }

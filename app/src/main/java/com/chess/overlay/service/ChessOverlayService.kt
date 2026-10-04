@@ -109,9 +109,24 @@ class ChessOverlayService : Service() {
         val metrics = DisplayMetrics()
         @Suppress("DEPRECATION")
         wm.defaultDisplay.getRealMetrics(metrics)
-        boardWidth = metrics.widthPixels.toFloat()
-        boardTopY = (metrics.heightPixels - boardWidth) / 2.3f
+        val defaultWidth = metrics.widthPixels.toFloat()
+        val defaultTopY = (metrics.heightPixels - defaultWidth) / 2.3f
+
+        val prefs = getSharedPreferences("ChessOverlayPrefs", Context.MODE_PRIVATE)
+        boardWidth = prefs.getFloat("saved_board_width", defaultWidth)
+        boardTopY = prefs.getFloat("saved_board_top_y", defaultTopY)
+        isWhiteBottom = prefs.getBoolean("saved_is_white_bottom", false)
+
         updateBoardBounds()
+    }
+
+    private fun saveCalibrationPrefs() {
+        val prefs = getSharedPreferences("ChessOverlayPrefs", Context.MODE_PRIVATE)
+        prefs.edit()
+            .putFloat("saved_board_width", boardWidth)
+            .putFloat("saved_board_top_y", boardTopY)
+            .putBoolean("saved_is_white_bottom", isWhiteBottom)
+            .apply()
     }
 
     private fun updateBoardBounds() {
@@ -359,7 +374,6 @@ class ChessOverlayService : Service() {
         btnToggleEngine.setOnClickListener {
             isEngineRunning = !isEngineRunning
             if (isEngineRunning) {
-                isBoardBoundsCalibrated = false
                 btnToggleEngine.text = if (isAutoVisionMode) "⏸️ STOP AUTO" else "⏸️ PAUSE"
                 btnToggleEngine.setBackgroundColor(getColor(R.color.threat_arrow))
                 calculateStockfishMoves()
@@ -415,6 +429,7 @@ class ChessOverlayService : Service() {
             setupBoard.isWhiteBottom = isWhiteBottom
             setupBoard.invalidate()
             updateBoardBounds()
+            saveCalibrationPrefs()
             calculateStockfishMoves()
             Toast.makeText(this, if (isWhiteBottom) "Perspektif: Putih di bawah" else "Perspektif: Hitam di bawah", Toast.LENGTH_SHORT).show()
         }
@@ -423,7 +438,6 @@ class ChessOverlayService : Service() {
         btnReset.setOnClickListener {
             countdownJob?.cancel()
             lastExecutedMove = null
-            isBoardBoundsCalibrated = false
             boardState.resetToStartingPosition()
             setupBoard.selectedSquare = null
             setupBoard.candidates = emptyList()
@@ -564,9 +578,6 @@ class ChessOverlayService : Service() {
             }
         }
 
-        val btnAutoAlign = view.findViewById<Button>(R.id.btnAutoAlign)
-        val btnSyncPieces = view.findViewById<Button>(R.id.btnSyncPieces)
-
         // Toggle Calibration Sub-panel (Titik Tracker & Penyelarasan Papan)
         btnToggleCalib.setOnClickListener {
             isCalibrationVisible = !isCalibrationVisible
@@ -576,56 +587,11 @@ class ChessOverlayService : Service() {
             arrowOverlayView?.invalidate()
         }
 
-        btnAutoAlign.setOnClickListener {
-            serviceScope.launch {
-                val helper = screenCaptureHelper
-                if (helper == null) {
-                    Toast.makeText(this@ChessOverlayService, "⚠️ Izin rekam layar belum aktif!", Toast.LENGTH_SHORT).show()
-                    return@launch
-                }
-                val bitmap = helper.captureSnapshot()
-                if (bitmap != null) {
-                    val detected = yellowDetector.detectBoardBounds(bitmap, forcedWhiteBottom = isWhiteBottom)
-                    if (detected != null) {
-                        boardTopY = detected.top
-                        boardWidth = detected.size
-                        isBoardBoundsCalibrated = true
-                        updateBoardBounds()
-                        arrowOverlayView?.invalidate()
-                        Toast.makeText(this@ChessOverlayService, "🎯 64 titik diselaraskan otomatis!", Toast.LENGTH_SHORT).show()
-                    } else {
-                        Toast.makeText(this@ChessOverlayService, "⚠️ Papan tidak terdeteksi, gunakan tombol ⬆️/⬇️.", Toast.LENGTH_SHORT).show()
-                    }
-                    bitmap.recycle()
-                }
-            }
-        }
-
-        btnSyncPieces.setOnClickListener {
-            serviceScope.launch {
-                val helper = screenCaptureHelper
-                if (helper == null) {
-                    Toast.makeText(this@ChessOverlayService, "⚠️ Izin rekam layar belum aktif!", Toast.LENGTH_SHORT).show()
-                    return@launch
-                }
-                val bitmap = helper.captureSnapshot()
-                if (bitmap != null) {
-                    val bounds = currentBoardBounds
-                    if (bounds != null) {
-                        pieceClassifier.scanBoardToBoardState(bitmap, bounds, boardState)
-                        setupBoardView?.invalidate()
-                        calculateStockfishMoves()
-                        Toast.makeText(this@ChessOverlayService, "📷 64 petak berhasil disinkronkan!", Toast.LENGTH_SHORT).show()
-                    }
-                    bitmap.recycle()
-                }
-            }
-        }
-
         btnUp.setOnClickListener {
             boardTopY -= 15f
             isBoardBoundsCalibrated = true
             updateBoardBounds()
+            saveCalibrationPrefs()
             arrowOverlayView?.invalidate()
             calculateStockfishMoves()
         }
@@ -633,6 +599,7 @@ class ChessOverlayService : Service() {
             boardTopY += 15f
             isBoardBoundsCalibrated = true
             updateBoardBounds()
+            saveCalibrationPrefs()
             arrowOverlayView?.invalidate()
             calculateStockfishMoves()
         }
@@ -640,6 +607,7 @@ class ChessOverlayService : Service() {
             boardWidth += 15f
             isBoardBoundsCalibrated = true
             updateBoardBounds()
+            saveCalibrationPrefs()
             arrowOverlayView?.invalidate()
             calculateStockfishMoves()
         }
@@ -647,6 +615,7 @@ class ChessOverlayService : Service() {
             boardWidth -= 15f
             isBoardBoundsCalibrated = true
             updateBoardBounds()
+            saveCalibrationPrefs()
             arrowOverlayView?.invalidate()
             calculateStockfishMoves()
         }
@@ -763,30 +732,6 @@ class ChessOverlayService : Service() {
             while (isActive && isEngineRunning && isAutoVisionMode) {
                 try {
                     val bitmap = helper.captureSnapshot()
-                    if (bitmap != null) {
-                        // 1. Kalibrasi posisi & orientasi papan secara otomatis jika belum dikalibrasi manual
-                        if (!isBoardBoundsCalibrated) {
-                            val detected = yellowDetector.detectBoardBounds(
-                                bitmap,
-                                forcedWhiteBottom = if (isPerspectiveManuallySet) isWhiteBottom else null
-                            )
-                            if (detected != null) {
-                                boardTopY = detected.top
-                                boardWidth = detected.size
-                                if (!isPerspectiveManuallySet) {
-                                    isWhiteBottom = detected.isWhiteBottom
-                                }
-                                withContext(Dispatchers.Main) {
-                                    updateBoardBounds()
-                                    panelView?.findViewById<Button>(R.id.btnFlipBoard)?.text =
-                                        if (isWhiteBottom) "🔄 Putih" else "🔄 Hitam"
-                                    setupBoardView?.isWhiteBottom = isWhiteBottom
-                                    setupBoardView?.invalidate()
-                                }
-                                isBoardBoundsCalibrated = true
-                            }
-                        }
-
                         val bounds = currentBoardBounds
                         if (bounds != null) {
                             val yellowSquares = yellowDetector.detectYellowSquares(bitmap, bounds)

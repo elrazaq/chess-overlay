@@ -122,8 +122,13 @@ class ChessOverlayService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         try {
+            // 1. Wajib jalankan Foreground Notification TERLEBIH DAHULU (syarat mutlak Android 14 sebelum getMediaProjection)
+            startForegroundNotification()
+            setupOverlayViews()
+
+            // 2. Inisialisasi MediaProjection setelah foreground service aktif
             val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, Activity.RESULT_CANCELED) ?: Activity.RESULT_CANCELED
-            val data = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val data: Intent? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 intent?.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
             } else {
                 @Suppress("DEPRECATION")
@@ -139,9 +144,6 @@ class ChessOverlayService : Service() {
                     e.printStackTrace()
                 }
             }
-
-            startForegroundNotification()
-            setupOverlayViews()
         } catch (e: Exception) {
             e.printStackTrace()
             Toast.makeText(this, "Error memulai overlay: ${e.message}", Toast.LENGTH_LONG).show()
@@ -542,11 +544,17 @@ class ChessOverlayService : Service() {
             setupBoard.invalidate()
 
             isEngineRunning = true
-            btnToggleEngine.text = "⏸️ PAUSE"
+            btnToggleEngine.text = if (isAutoVisionMode) "⏸️ STOP AUTO" else "⏸️ PAUSE"
             btnToggleEngine.setBackgroundColor(getColor(R.color.threat_arrow))
             calculateStockfishMoves()
-            enterMappingMode()
-            Toast.makeText(this, "Posisi disimpan! Mode mapping aktif.", Toast.LENGTH_SHORT).show()
+            if (isAutoVisionMode) {
+                setOverlayTouchable(false)
+                startAutoVisionLoop()
+                Toast.makeText(this, "Posisi disimpan! Mode Auto Vision aktif.", Toast.LENGTH_SHORT).show()
+            } else {
+                enterMappingMode()
+                Toast.makeText(this, "Posisi disimpan! Mode manual aktif.", Toast.LENGTH_SHORT).show()
+            }
         }
 
         // Toggle Calibration Sub-panel
@@ -611,11 +619,11 @@ class ChessOverlayService : Service() {
      */
     @SuppressLint("SetTextI18n")
     private fun enterMappingMode() {
-        if (!isEngineRunning) return
+        if (!isEngineRunning || isAutoVisionMode) return
         countdownJob?.cancel()
         countdownJob = null
 
-        setOverlayTouchable(true) // Overlay menangkap sentuhan di layar
+        setOverlayTouchable(true) // Hanya aktif saat Mode Manual
         isMappingModeActive = true
 
         val view = panelView ?: return
@@ -648,8 +656,12 @@ class ChessOverlayService : Service() {
         val overlay = arrowOverlayView ?: return
         val params = arrowLayoutParams ?: return
 
-        overlay.isInputMoveMode = touchable
-        if (touchable) {
+        // PENTING: Dalam mode Auto Vision, fullscreen overlay WAJIB SELALU tembus sentuh 100% (FLAG_NOT_TOUCHABLE)
+        // Pengguna harus SELALU bisa menyentuh dan menggerakkan bidak di aplikasi Chess.com tanpa hambatan!
+        val effectiveTouchable = if (isAutoVisionMode) false else touchable
+
+        overlay.isInputMoveMode = effectiveTouchable
+        if (effectiveTouchable) {
             params.flags = params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
         } else {
             params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
@@ -671,15 +683,14 @@ class ChessOverlayService : Service() {
 
         val helper = screenCaptureHelper
         if (helper == null) {
-            Toast.makeText(this, "Izin rekam layar belum ada. Buka app utama untuk mengizinkan.", Toast.LENGTH_LONG).show()
-            isAutoVisionMode = false
-            panelView?.findViewById<Button>(R.id.btnToggleMode)?.let {
-                it.text = "🎮 Mode: Manual (Jeda Timer)"
-                it.setBackgroundColor(Color.parseColor("#475569"))
-            }
-            panelView?.findViewById<LinearLayout>(R.id.delayContainer)?.visibility = View.VISIBLE
-            startFreeMoveDelay(delayDurationSeconds, isResumeBuffer = true)
+            Toast.makeText(this, "⚠️ Izin rekam layar belum aktif! Buka aplikasi utama dan klik tombol Izinkan.", Toast.LENGTH_LONG).show()
+            panelView?.findViewById<TextView>(R.id.tvEngineTitle)?.text = "⚠️ Izin Rekam Layar Belum Ada"
             return
+        }
+
+        panelView?.findViewById<TextView>(R.id.tvEngineTitle)?.let {
+            val sideText = if (boardState.isWhiteToMove) "Putih" else "Hitam"
+            it.text = "⚡ Vision: Giliran $sideText"
         }
 
         autoVisionJob = serviceScope.launch(Dispatchers.Default) {

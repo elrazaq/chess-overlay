@@ -84,7 +84,7 @@ class ScreenCaptureHelper(
         try {
             // Coba ambil frame terbaru dengan cepat
             for (attempt in 0..2) {
-                image = imageReader?.acquireLatestImage()
+                image = imageReader?.acquireLatestImage() ?: imageReader?.acquireNextImage()
                 if (image != null) break
                 delay(25)
             }

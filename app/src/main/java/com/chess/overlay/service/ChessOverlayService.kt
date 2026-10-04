@@ -732,6 +732,7 @@ class ChessOverlayService : Service() {
             while (isActive && isEngineRunning && isAutoVisionMode) {
                 try {
                     val bitmap = helper.captureSnapshot()
+                    if (bitmap != null) {
                         val bounds = currentBoardBounds
                         if (bounds != null) {
                             val yellowSquares = yellowDetector.detectYellowSquares(bitmap, bounds)

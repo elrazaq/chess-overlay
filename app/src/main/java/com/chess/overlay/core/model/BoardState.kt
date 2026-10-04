@@ -422,6 +422,75 @@ class BoardState {
     }
 
     /**
+     * Memastikan minimal ada 1 Raja Putih & 1 Raja Hitam di papan agar FEN valid untuk Stockfish.
+     */
+    fun ensureKingsExist() {
+        val (wk, bk) = countKings()
+        if (wk == 0) {
+            val preferred = Square(4, 0)
+            if (getPiece(preferred) == null) {
+                setPiece(preferred, Piece(PieceType.KING, true))
+            } else {
+                findFirstEmptySquare()?.let { setPiece(it, Piece(PieceType.KING, true)) }
+            }
+        }
+        if (bk == 0) {
+            val preferred = Square(4, 7)
+            if (getPiece(preferred) == null) {
+                setPiece(preferred, Piece(PieceType.KING, false))
+            } else {
+                findFirstEmptySquare()?.let { setPiece(it, Piece(PieceType.KING, false)) }
+            }
+        }
+    }
+
+    private fun findFirstEmptySquare(): Square? {
+        for (r in 0..7) {
+            for (f in 0..7) {
+                val sq = Square(f, r)
+                if (getPiece(sq) == null) return sq
+            }
+        }
+        return null
+    }
+
+    /**
+     * Memindahkan bidak secara paksa saat posisi internal berbeda dari visual layar
+     * (misalnya pengguna mulai mengaktifkan auto-detection di tengah-tengah game).
+     * Selalu berhasil, memperbarui giliran, dan menjamin Stockfish tidak pernah macet/hang.
+     */
+    fun forceMove(from: Square, to: Square): Boolean {
+        val fromRow = 7 - from.rank
+        val fromCol = from.file
+        val toRow = 7 - to.rank
+        val toCol = to.file
+
+        var piece = grid[fromRow][fromCol]
+        if (piece == null) {
+            piece = Piece(PieceType.QUEEN, isWhiteToMove)
+        }
+
+        val captured = grid[toRow][toCol]
+        grid[toRow][toCol] = piece
+        grid[fromRow][fromCol] = null
+
+        ensureKingsExist()
+
+        moveHistory.add(
+            MoveRecord(
+                from = from,
+                to = to,
+                movedPiece = piece,
+                capturedPiece = captured,
+                prevTurn = isWhiteToMove
+            )
+        )
+
+        isWhiteToMove = !isWhiteToMove
+        return true
+    }
+
+    /**
      * Mengurungkan (Undo) langkah terakhir jika salah tap.
      */
     fun undoMove(): Boolean {

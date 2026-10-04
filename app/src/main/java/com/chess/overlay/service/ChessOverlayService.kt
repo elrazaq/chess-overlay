@@ -59,6 +59,8 @@ class ChessOverlayService : Service() {
     private var isPanelMinimized = false
     private var isCalibrationVisible = false
     private var isWhiteBottom = false // Default Hitam di bawah (sesuai preferensi user)
+    private var isPerspectiveManuallySet = false
+    private var isBoardBoundsCalibrated = false
     private var delayDurationSeconds = 3 // Default 3 detik jeda gerak bebas
     private var countdownJob: Job? = null
     private var isMappingModeActive = false
@@ -355,6 +357,7 @@ class ChessOverlayService : Service() {
         btnToggleEngine.setOnClickListener {
             isEngineRunning = !isEngineRunning
             if (isEngineRunning) {
+                isBoardBoundsCalibrated = false
                 btnToggleEngine.text = if (isAutoVisionMode) "⏸️ STOP AUTO" else "⏸️ PAUSE"
                 btnToggleEngine.setBackgroundColor(getColor(R.color.threat_arrow))
                 calculateStockfishMoves()
@@ -405,6 +408,7 @@ class ChessOverlayService : Service() {
         // Balik Papan (Putih / Hitam di bawah)
         btnFlip.setOnClickListener {
             isWhiteBottom = !isWhiteBottom
+            isPerspectiveManuallySet = true
             btnFlip.text = if (isWhiteBottom) "🔄 Putih" else "🔄 Hitam"
             setupBoard.isWhiteBottom = isWhiteBottom
             setupBoard.invalidate()
@@ -417,6 +421,7 @@ class ChessOverlayService : Service() {
         btnReset.setOnClickListener {
             countdownJob?.cancel()
             lastExecutedMove = null
+            isBoardBoundsCalibrated = false
             boardState.resetToStartingPosition()
             setupBoard.selectedSquare = null
             setupBoard.candidates = emptyList()
@@ -566,21 +571,25 @@ class ChessOverlayService : Service() {
 
         btnUp.setOnClickListener {
             boardTopY -= 15f
+            isBoardBoundsCalibrated = true
             updateBoardBounds()
             calculateStockfishMoves()
         }
         btnDown.setOnClickListener {
             boardTopY += 15f
+            isBoardBoundsCalibrated = true
             updateBoardBounds()
             calculateStockfishMoves()
         }
         btnPlus.setOnClickListener {
             boardWidth += 15f
+            isBoardBoundsCalibrated = true
             updateBoardBounds()
             calculateStockfishMoves()
         }
         btnMinus.setOnClickListener {
             boardWidth -= 15f
+            isBoardBoundsCalibrated = true
             updateBoardBounds()
             calculateStockfishMoves()
         }
@@ -698,35 +707,44 @@ class ChessOverlayService : Service() {
                 try {
                     val bitmap = helper.captureSnapshot()
                     if (bitmap != null) {
+                        // 1. Kalibrasi posisi & orientasi papan secara otomatis jika belum dikalibrasi manual
+                        if (!isBoardBoundsCalibrated) {
+                            val detected = yellowDetector.detectBoardBounds(
+                                bitmap,
+                                forcedWhiteBottom = if (isPerspectiveManuallySet) isWhiteBottom else null
+                            )
+                            if (detected != null) {
+                                boardTopY = detected.top
+                                boardWidth = detected.size
+                                if (!isPerspectiveManuallySet) {
+                                    isWhiteBottom = detected.isWhiteBottom
+                                }
+                                withContext(Dispatchers.Main) {
+                                    updateBoardBounds()
+                                    panelView?.findViewById<Button>(R.id.btnFlipBoard)?.text =
+                                        if (isWhiteBottom) "🔄 Putih" else "🔄 Hitam"
+                                    setupBoardView?.isWhiteBottom = isWhiteBottom
+                                    setupBoardView?.invalidate()
+                                }
+                                isBoardBoundsCalibrated = true
+                            }
+                        }
+
                         val bounds = currentBoardBounds
                         if (bounds != null) {
                             val yellowSquares = yellowDetector.detectYellowSquares(bitmap, bounds)
 
                             // Pada Chess.com, langkah yang sudah selesai menghasilkan tepat 2 petak kuning (from & to)
                             if (yellowSquares.size == 2) {
-                                val sq1 = yellowSquares[0]
-                                val sq2 = yellowSquares[1]
+                                val (from, to) = yellowDetector.detectMoveFromYellowSquares(
+                                    bitmap, bounds, yellowSquares[0], yellowSquares[1]
+                                )
 
-                                withContext(Dispatchers.Main) {
-                                    val from: Square?
-                                    val to: Square?
-                                    if (boardState.isValidMove(sq1, sq2)) {
-                                        from = sq1
-                                        to = sq2
-                                    } else if (boardState.isValidMove(sq2, sq1)) {
-                                        from = sq2
-                                        to = sq1
-                                    } else {
-                                        from = null
-                                        to = null
-                                    }
-
-                                    if (from != null && to != null) {
-                                        val movePair = Pair(from, to)
-                                        if (movePair != lastExecutedMove) {
-                                            lastExecutedMove = movePair
-                                            executeMove(from, to, isAutoVision = true)
-                                        }
+                                val movePair = Pair(from, to)
+                                if (movePair != lastExecutedMove) {
+                                    lastExecutedMove = movePair
+                                    withContext(Dispatchers.Main) {
+                                        executeMove(from, to, isAutoVision = true)
                                     }
                                 }
                             }
@@ -747,7 +765,14 @@ class ChessOverlayService : Service() {
      * lalu otomatis mengaktifkan jeda timer gerak bebas (atau loop Auto Vision)!
      */
     private fun executeMove(from: Square, to: Square, isAutoVision: Boolean = false): Boolean {
-        val moved = boardState.makeMove(from, to)
+        var moved = boardState.makeMove(from, to)
+        if (!moved && isAutoVision) {
+            // Fallback untuk mode auto vision: jika validasi legal move standar gagal
+            // (misal game dimulai di tengah match seperti 7. Qxd4),
+            // lakukan forceMove agar papan & Stockfish tetap sinkron dan panah SELALU terupdate!
+            moved = boardState.forceMove(from, to)
+        }
+
         if (moved) {
             sourceSquare = null
             arrowOverlayView?.selectedSquare = null

@@ -2,6 +2,7 @@ package com.chess.overlay.core.vision
 
 import android.graphics.Bitmap
 import com.chess.overlay.core.model.BoardBounds
+import com.chess.overlay.core.model.BoardState
 import com.chess.overlay.core.model.Square
 
 /**
@@ -165,10 +166,37 @@ class YellowHighlightDetector {
 
     /**
      * Membedakan petak asal (FROM) dan tujuan (TO) dari 2 petak kuning yang terdeteksi.
-     * Petak asal (FROM) telah ditinggalkan bidak sehingga bagian tengahnya kosong (variansi piksel rendah).
-     * Petak tujuan (TO) kini berisi bidak (variansi piksel tinggi terhadap latar belakang kuning).
+     * Menggunakan validasi langkah catur legal & status virtual terlebih dahulu agar 100% akurat.
+     * Jika ambigu, fallback ke variansi piksel tengah.
      */
-    fun detectMoveFromYellowSquares(bitmap: Bitmap, bounds: BoardBounds, sq1: Square, sq2: Square): Pair<Square, Square> {
+    fun detectMoveFromYellowSquares(
+        bitmap: Bitmap,
+        bounds: BoardBounds,
+        sq1: Square,
+        sq2: Square,
+        boardState: BoardState? = null
+    ): Pair<Square, Square> {
+        if (boardState != null) {
+            val turn = boardState.isWhiteToMove
+            val p1 = boardState.getPiece(sq1)
+            val p2 = boardState.getPiece(sq2)
+
+            // 1. Cek legalitas langkah catur murni: mana yang bisa melangkah ke yang lain secara sah
+            val sq1Legal = p1 != null && p1.isWhite == turn && boardState.isValidMove(sq1, sq2)
+            val sq2Legal = p2 != null && p2.isWhite == turn && boardState.isValidMove(sq2, sq1)
+
+            if (sq1Legal && !sq2Legal) return Pair(sq1, sq2)
+            if (sq2Legal && !sq1Legal) return Pair(sq2, sq1)
+
+            // 2. Berdasarkan kepemilikan bidak pada giliran aktif
+            if (p1 != null && p1.isWhite == turn && (p2 == null || p2.isWhite != turn)) return Pair(sq1, sq2)
+            if (p2 != null && p2.isWhite == turn && (p1 == null || p1.isWhite != turn)) return Pair(sq2, sq1)
+
+            // 3. Petak mana yang berisi bidak vs petak kosong
+            if (p1 != null && p2 == null) return Pair(sq1, sq2)
+            if (p2 != null && p1 == null) return Pair(sq2, sq1)
+        }
+
         val v1 = getCenterVarianceFromSquareCorner(bitmap, bounds, sq1)
         val v2 = getCenterVarianceFromSquareCorner(bitmap, bounds, sq2)
 

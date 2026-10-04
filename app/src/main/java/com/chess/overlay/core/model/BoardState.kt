@@ -483,9 +483,8 @@ class BoardState {
             grid[toRow][toCol] = movedPiece
             grid[fromRow][fromCol] = null
         } else {
-            // Jika petak asal kosong, pertahankan bidak di petak tujuan atau gunakan bidak yang ada
-            movedPiece = grid[toRow][toCol] ?: Piece(PieceType.PAWN, isWhiteToMove)
-            grid[toRow][toCol] = movedPiece
+            // Jangan pernah spawn pion siluman jika petak asal kosong!
+            return false
         }
 
         ensureKingsExist()

@@ -59,7 +59,7 @@ class ChessOverlayService : Service() {
     private var isEngineRunning = false
     private var isPanelMinimized = false
     private var isCalibrationVisible = false
-    private var isWhiteBottom = false // Default Hitam di bawah (sesuai preferensi user)
+    private var isWhiteBottom = true // Default Putih di bawah (standar catur)
     private var isPerspectiveManuallySet = false
     private var isBoardBoundsCalibrated = false
     private var delayDurationSeconds = 3 // Default 3 detik jeda gerak bebas
@@ -115,7 +115,7 @@ class ChessOverlayService : Service() {
         val prefs = getSharedPreferences("ChessOverlayPrefs", Context.MODE_PRIVATE)
         boardWidth = prefs.getFloat("saved_board_width", defaultWidth)
         boardTopY = prefs.getFloat("saved_board_top_y", defaultTopY)
-        isWhiteBottom = prefs.getBoolean("saved_is_white_bottom", false)
+        isWhiteBottom = prefs.getBoolean("saved_is_white_bottom", true)
 
         updateBoardBounds()
     }
@@ -723,6 +723,15 @@ class ChessOverlayService : Service() {
             return
         }
 
+        // Sembunyikan titik kalibrasi saat vision berjalan agar tidak mengotori tangkapan layar
+        if (isCalibrationVisible) {
+            isCalibrationVisible = false
+            panelView?.findViewById<View>(R.id.calibrationPanel)?.visibility = View.GONE
+            panelView?.findViewById<Button>(R.id.btnToggleCalibrate)?.setTextColor(Color.parseColor("#94A3B8"))
+            arrowOverlayView?.isCalibrationMode = false
+            arrowOverlayView?.invalidate()
+        }
+
         panelView?.findViewById<TextView>(R.id.tvEngineTitle)?.let {
             val sideText = if (boardState.isWhiteToMove) "Putih" else "Hitam"
             it.text = "⚡ Vision: Giliran $sideText"
@@ -740,7 +749,7 @@ class ChessOverlayService : Service() {
                             // Pada Chess.com, langkah yang sudah selesai menghasilkan tepat 2 petak kuning (from & to)
                             if (yellowSquares.size == 2) {
                                 val (from, to) = yellowDetector.detectMoveFromYellowSquares(
-                                    bitmap, bounds, yellowSquares[0], yellowSquares[1]
+                                    bitmap, bounds, yellowSquares[0], yellowSquares[1], boardState
                                 )
 
                                 val movePair = Pair(from, to)

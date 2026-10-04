@@ -35,6 +35,7 @@ import com.chess.overlay.core.model.Square
 import com.chess.overlay.core.overlay.ArrowOverlayView
 import com.chess.overlay.core.overlay.SetupBoardView
 import com.chess.overlay.core.overlay.SetupTool
+import com.chess.overlay.core.vision.PieceClassifier
 import com.chess.overlay.core.vision.YellowHighlightDetector
 import kotlinx.coroutines.*
 
@@ -68,6 +69,7 @@ class ChessOverlayService : Service() {
     // Auto Vision Screen Capture & Yellow Highlight Tracking
     private var screenCaptureHelper: ScreenCaptureHelper? = null
     private val yellowDetector = YellowHighlightDetector()
+    private val pieceClassifier = PieceClassifier()
     private var isAutoVisionMode = true // Default mode auto bullet
     private var autoVisionJob: Job? = null
     private var lastExecutedMove: Pair<Square, Square>? = null
@@ -562,35 +564,90 @@ class ChessOverlayService : Service() {
             }
         }
 
-        // Toggle Calibration Sub-panel
+        val btnAutoAlign = view.findViewById<Button>(R.id.btnAutoAlign)
+        val btnSyncPieces = view.findViewById<Button>(R.id.btnSyncPieces)
+
+        // Toggle Calibration Sub-panel (Titik Tracker & Penyelarasan Papan)
         btnToggleCalib.setOnClickListener {
             isCalibrationVisible = !isCalibrationVisible
             calibrationPanel.visibility = if (isCalibrationVisible) View.VISIBLE else View.GONE
             btnToggleCalib.setTextColor(if (isCalibrationVisible) Color.parseColor("#38BDF8") else Color.parseColor("#94A3B8"))
+            arrowOverlayView?.isCalibrationMode = isCalibrationVisible
+            arrowOverlayView?.invalidate()
+        }
+
+        btnAutoAlign.setOnClickListener {
+            serviceScope.launch {
+                val helper = screenCaptureHelper
+                if (helper == null) {
+                    Toast.makeText(this@ChessOverlayService, "⚠️ Izin rekam layar belum aktif!", Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+                val bitmap = helper.captureSnapshot()
+                if (bitmap != null) {
+                    val detected = yellowDetector.detectBoardBounds(bitmap, forcedWhiteBottom = isWhiteBottom)
+                    if (detected != null) {
+                        boardTopY = detected.top
+                        boardWidth = detected.size
+                        isBoardBoundsCalibrated = true
+                        updateBoardBounds()
+                        arrowOverlayView?.invalidate()
+                        Toast.makeText(this@ChessOverlayService, "🎯 64 titik diselaraskan otomatis!", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(this@ChessOverlayService, "⚠️ Papan tidak terdeteksi, gunakan tombol ⬆️/⬇️.", Toast.LENGTH_SHORT).show()
+                    }
+                    bitmap.recycle()
+                }
+            }
+        }
+
+        btnSyncPieces.setOnClickListener {
+            serviceScope.launch {
+                val helper = screenCaptureHelper
+                if (helper == null) {
+                    Toast.makeText(this@ChessOverlayService, "⚠️ Izin rekam layar belum aktif!", Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+                val bitmap = helper.captureSnapshot()
+                if (bitmap != null) {
+                    val bounds = currentBoardBounds
+                    if (bounds != null) {
+                        pieceClassifier.scanBoardToBoardState(bitmap, bounds, boardState)
+                        setupBoardView?.invalidate()
+                        calculateStockfishMoves()
+                        Toast.makeText(this@ChessOverlayService, "📷 64 petak berhasil disinkronkan!", Toast.LENGTH_SHORT).show()
+                    }
+                    bitmap.recycle()
+                }
+            }
         }
 
         btnUp.setOnClickListener {
             boardTopY -= 15f
             isBoardBoundsCalibrated = true
             updateBoardBounds()
+            arrowOverlayView?.invalidate()
             calculateStockfishMoves()
         }
         btnDown.setOnClickListener {
             boardTopY += 15f
             isBoardBoundsCalibrated = true
             updateBoardBounds()
+            arrowOverlayView?.invalidate()
             calculateStockfishMoves()
         }
         btnPlus.setOnClickListener {
             boardWidth += 15f
             isBoardBoundsCalibrated = true
             updateBoardBounds()
+            arrowOverlayView?.invalidate()
             calculateStockfishMoves()
         }
         btnMinus.setOnClickListener {
             boardWidth -= 15f
             isBoardBoundsCalibrated = true
             updateBoardBounds()
+            arrowOverlayView?.invalidate()
             calculateStockfishMoves()
         }
     }
@@ -744,6 +801,8 @@ class ChessOverlayService : Service() {
                                 if (movePair != lastExecutedMove) {
                                     lastExecutedMove = movePair
                                     withContext(Dispatchers.Main) {
+                                        arrowOverlayView?.activeTrackingMove = movePair
+                                        arrowOverlayView?.invalidate()
                                         executeMove(from, to, isAutoVision = true)
                                     }
                                 }

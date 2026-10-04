@@ -455,24 +455,38 @@ class BoardState {
     }
 
     /**
-     * Memindahkan bidak secara paksa saat posisi internal berbeda dari visual layar
-     * (misalnya pengguna mulai mengaktifkan auto-detection di tengah-tengah game).
-     * Selalu berhasil, memperbarui giliran, dan menjamin Stockfish tidak pernah macet/hang.
+     * Memindahkan bidak dengan menjamin identitas aslinya TIDAK PERNAH bermutasi.
+     * Pion tetap Pion, Kuda tetap Kuda, Benteng tetap Benteng.
      */
     fun forceMove(from: Square, to: Square): Boolean {
+        // Coba jalan legal standar terlebih dahulu jika valid
+        if (isValidMove(from, to)) {
+            return makeMove(from, to, skipValidation = false)
+        }
+
         val fromRow = 7 - from.rank
         val fromCol = from.file
         val toRow = 7 - to.rank
         val toCol = to.file
 
-        var piece = grid[fromRow][fromCol]
-        if (piece == null) {
-            piece = Piece(PieceType.QUEEN, isWhiteToMove)
-        }
-
+        val sourcePiece = grid[fromRow][fromCol]
         val captured = grid[toRow][toCol]
-        grid[toRow][toCol] = piece
-        grid[fromRow][fromCol] = null
+
+        val movedPiece: Piece
+        if (sourcePiece != null) {
+            // Promosi pion hanya jika mencapai baris ujung (rank 7 atau 0)
+            movedPiece = if (sourcePiece.type == PieceType.PAWN && (to.rank == 7 || to.rank == 0)) {
+                Piece(PieceType.QUEEN, sourcePiece.isWhite)
+            } else {
+                sourcePiece
+            }
+            grid[toRow][toCol] = movedPiece
+            grid[fromRow][fromCol] = null
+        } else {
+            // Jika petak asal kosong, pertahankan bidak di petak tujuan atau gunakan bidak yang ada
+            movedPiece = grid[toRow][toCol] ?: Piece(PieceType.PAWN, isWhiteToMove)
+            grid[toRow][toCol] = movedPiece
+        }
 
         ensureKingsExist()
 
@@ -480,7 +494,7 @@ class BoardState {
             MoveRecord(
                 from = from,
                 to = to,
-                movedPiece = piece,
+                movedPiece = movedPiece,
                 capturedPiece = captured,
                 prevTurn = isWhiteToMove
             )

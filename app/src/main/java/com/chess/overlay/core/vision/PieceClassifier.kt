@@ -71,6 +71,7 @@ class PieceClassifier {
 
     /**
      * Mendeteksi ada/tidaknya bidak pada suatu petak beserta jenis & warnanya.
+     * Menggunakan analisis siluet morfologi akurat untuk tema bidak Chess.com (Neo/Classic).
      */
     fun detectPieceAtSquare(
         bitmap: Bitmap,
@@ -83,30 +84,17 @@ class PieceClassifier {
         val innerH = size - 2 * margin
         if (innerW <= 4 || innerH <= 4) return null
 
+        // Ambil warna latar petak yang aman dari teks koordinat (di posisi tengah-atas)
+        val bgRefX = (startX + size * 0.5f).toInt().coerceIn(0, bitmap.width - 1)
+        val bgRefY = (startY + size * 0.08f).toInt().coerceIn(0, bitmap.height - 1)
+        val bgPixel = bitmap.getPixel(bgRefX, bgRefY)
+        val bgR = (bgPixel shr 16) and 0xFF
+        val bgG = (bgPixel shr 8) and 0xFF
+        val bgB = bgPixel and 0xFF
+
         val grayGrid = Array(innerH) { IntArray(innerW) }
-        val edgeLums = ArrayList<Int>()
-
-        for (y in 0 until innerH) {
-            val py = (startY + margin + y).coerceIn(0, bitmap.height - 1)
-            for (x in 0 until innerW) {
-                val px = (startX + margin + x).coerceIn(0, bitmap.width - 1)
-                val p = bitmap.getPixel(px, py)
-                val lum = ((p shr 16 and 0xFF) * 299 + (p shr 8 and 0xFF) * 587 + (p and 0xFF) * 114) / 1000
-                grayGrid[y][x] = lum
-                if (y == 0 || y == innerH - 1 || x == 0 || x == innerW - 1) {
-                    edgeLums.add(lum)
-                }
-            }
-        }
-
-        if (edgeLums.isEmpty()) return null
-        edgeLums.sort()
-        val bgLum = edgeLums[edgeLums.size / 2]
-
-        var bgMatchingPixels = 0
-        var totalPixels = 0
         var piecePixels = 0
-        var pieceLumSum = 0
+        var brightPixels = 0
         var minX = innerW
         var maxX = 0
         var minY = innerH
@@ -114,16 +102,23 @@ class PieceClassifier {
         val pieceCoords = ArrayList<Pair<Int, Int>>()
 
         for (y in 0 until innerH) {
+            val py = (startY + margin + y).coerceIn(0, bitmap.height - 1)
             for (x in 0 until innerW) {
-                val lum = grayGrid[y][x]
-                totalPixels++
-                val diff = Math.abs(lum - bgLum)
-                if (diff < 20) {
-                    bgMatchingPixels++
-                } else if (diff >= 22) {
+                val px = (startX + margin + x).coerceIn(0, bitmap.width - 1)
+                val p = bitmap.getPixel(px, py)
+                val pr = (p shr 16) and 0xFF
+                val pg = (p shr 8) and 0xFF
+                val pb = p and 0xFF
+
+                val lum = (pr * 299 + pg * 587 + pb * 114) / 1000
+                grayGrid[y][x] = lum
+
+                val diff = Math.abs(pr - bgR) + Math.abs(pg - bgG) + Math.abs(pb - bgB)
+                if (diff > 40) {
                     piecePixels++
-                    pieceLumSum += lum
                     pieceCoords.add(Pair(x, y))
+                    if (lum > 180) brightPixels++
+
                     if (x < minX) minX = x
                     if (x > maxX) maxX = x
                     if (y < minY) minY = y
@@ -132,30 +127,23 @@ class PieceClassifier {
             }
         }
 
-        // Rasio piksel background: jika >= 85%, petak 100% KOSONG!
-        val bgRatio = bgMatchingPixels.toFloat() / totalPixels
-        if (bgRatio >= 0.85f || piecePixels < (totalPixels * 0.12f) || minX > maxX || minY > maxY) {
+        val totalInner = innerW * innerH
+        // Jika piksel bidak < 12% dari area petak, petak 100% KOSONG!
+        if (piecePixels < (totalInner * 0.12f) || minX > maxX || minY > maxY) {
             return null
         }
 
-        // Deteksi Warna Bidak:
-        val isWhite = if (bgLum > 180) {
-            // Pada petak terang/buff, bidak hitam memiliki banyak piksel sangat gelap (< 100)
-            var darkCount = 0
-            for ((cx, cy) in pieceCoords) {
-                if (grayGrid[cy][cx] < 100) darkCount++
-            }
-            val darkRatio = darkCount.toFloat() / piecePixels
-            darkRatio < 0.25f
-        } else {
-            // Pada petak gelap/hijau, bidak putih jauh lebih terang dari background
-            val avgPieceLum = pieceLumSum.toFloat() / piecePixels
-            avgPieceLum > 130f
-        }
+        // 1. Deteksi Warna Bidak:
+        // Bidak putih di Chess.com memiliki persentase piksel sangat terang (lum > 180) > 30%
+        val isWhite = (brightPixels.toFloat() / piecePixels) > 0.30f
 
-        // Morfologi Bentuk Bidak:
-        val ph = maxY - minY + 1
+        // 2. Morfologi Siluet Bidak:
+        val pw = (maxX - minX + 1).coerceAtLeast(1)
+        val ph = (maxY - minY + 1).coerceAtLeast(1)
         val hRatio = ph.toFloat() / innerH
+        val areaRatio = piecePixels.toFloat() / totalInner
+
+        // Asimetri Kiri vs Kanan (Kuda/Knight menghadap ke kiri)
         val midX = (minX + maxX) / 2
         var leftCount = 0
         var rightCount = 0
@@ -165,19 +153,33 @@ class PieceClassifier {
         }
         val asym = Math.abs(leftCount - rightCount).toFloat() / piecePixels
 
-        val topYThresh = minY + ph * 0.25f
-        var topArea = 0
-        for ((_, cy) in pieceCoords) {
-            if (cy < topYThresh) topArea++
+        // Rasio Lebar Atas (Top 22%) terhadap Lebar Maksimal
+        val topYThresh = minY + ph * 0.22f
+        var topMinX = innerW
+        var topMaxX = 0
+        var hasTopPixels = false
+        for ((cx, cy) in pieceCoords) {
+            if (cy < topYThresh) {
+                hasTopPixels = true
+                if (cx < topMinX) topMinX = cx
+                if (cx > topMaxX) topMaxX = cx
+            }
         }
-        val topRatio = topArea.toFloat() / piecePixels
+        val topW = if (hasTopPixels) (topMaxX - topMinX + 1) else 0
+        val topWRatio = topW.toFloat() / pw
 
         val pieceType = when {
-            asym > 0.25f -> PieceType.KNIGHT
-            piecePixels < (totalPixels * 0.26f) || hRatio < 0.72f -> PieceType.PAWN
-            topRatio > 0.24f -> PieceType.ROOK
-            hRatio > 0.84f -> PieceType.KING
-            hRatio > 0.78f || topRatio > 0.18f -> PieceType.QUEEN
+            // Pion: Bidak paling kecil & ramping
+            areaRatio < 0.40f && hRatio < 0.88f -> PieceType.PAWN
+            // Kuda: Asimetris
+            asym > 0.065f && hRatio < 0.98f -> PieceType.KNIGHT
+            // Benteng: Bagian atas lebar & datar
+            topWRatio > 0.70f && hRatio < 0.95f -> PieceType.ROOK
+            // Ratu: Mahkota melebar
+            hRatio >= 0.92f && topWRatio > 0.80f -> PieceType.QUEEN
+            // Raja: Paling tinggi dengan salib di puncak (lebar puncak kecil)
+            hRatio >= 0.95f && topWRatio < 0.50f -> PieceType.KING
+            // Gajah: Bahu lonjong dengan leher mengerucut
             else -> PieceType.BISHOP
         }
 

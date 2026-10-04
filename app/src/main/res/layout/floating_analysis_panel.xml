@@ -469,60 +469,97 @@
                 android:padding="0dp" />
         </LinearLayout>
 
-        <!-- Calibration Sub-panel -->
+        <!-- Calibration Sub-panel (Titik Tracker & Penyelarasan Papan) -->
         <LinearLayout
             android:id="@+id/calibrationPanel"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
+            android:orientation="vertical"
             android:layout_marginTop="3dp"
             android:background="#1E293B"
             android:padding="4dp"
             android:visibility="gone">
 
-            <TextView
-                android:layout_width="wrap_content"
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Papan: "
-                android:textColor="#94A3B8"
-                android:textSize="9.5sp"
-                android:layout_marginEnd="4dp" />
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
 
-            <Button
-                android:id="@+id/btnMoveUp"
-                android:layout_width="32dp"
-                android:layout_height="28dp"
-                android:text="⬆️"
-                android:textSize="9.5sp"
-                android:padding="0dp"
-                android:layout_marginEnd="2dp" />
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Papan: "
+                    android:textColor="#94A3B8"
+                    android:textSize="9.5sp"
+                    android:layout_marginEnd="4dp" />
 
-            <Button
-                android:id="@+id/btnMoveDown"
-                android:layout_width="32dp"
-                android:layout_height="28dp"
-                android:text="⬇️"
-                android:textSize="9.5sp"
-                android:padding="0dp"
-                android:layout_marginEnd="4dp" />
+                <Button
+                    android:id="@+id/btnMoveUp"
+                    android:layout_width="32dp"
+                    android:layout_height="28dp"
+                    android:text="⬆️"
+                    android:textSize="9.5sp"
+                    android:padding="0dp"
+                    android:layout_marginEnd="2dp" />
 
-            <Button
-                android:id="@+id/btnScalePlus"
-                android:layout_width="32dp"
-                android:layout_height="28dp"
-                android:text="➕"
-                android:textSize="9.5sp"
-                android:padding="0dp"
-                android:layout_marginEnd="2dp" />
+                <Button
+                    android:id="@+id/btnMoveDown"
+                    android:layout_width="32dp"
+                    android:layout_height="28dp"
+                    android:text="⬇️"
+                    android:textSize="9.5sp"
+                    android:padding="0dp"
+                    android:layout_marginEnd="4dp" />
 
-            <Button
-                android:id="@+id/btnScaleMinus"
-                android:layout_width="32dp"
-                android:layout_height="28dp"
-                android:text="➖"
-                android:textSize="9.5sp"
-                android:padding="0dp" />
+                <Button
+                    android:id="@+id/btnScalePlus"
+                    android:layout_width="32dp"
+                    android:layout_height="28dp"
+                    android:text="➕"
+                    android:textSize="9.5sp"
+                    android:padding="0dp"
+                    android:layout_marginEnd="2dp" />
+
+                <Button
+                    android:id="@+id/btnScaleMinus"
+                    android:layout_width="32dp"
+                    android:layout_height="28dp"
+                    android:text="➖"
+                    android:textSize="9.5sp"
+                    android:padding="0dp" />
+            </LinearLayout>
+
+            <!-- Quick Auto-Align & Piece Scanner Actions -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="3dp">
+
+                <Button
+                    android:id="@+id/btnAutoAlign"
+                    android:layout_width="0dp"
+                    android:layout_height="28dp"
+                    android:layout_weight="1"
+                    android:text="🎯 Auto-Align"
+                    android:backgroundTint="#0284C7"
+                    android:textColor="#FFFFFF"
+                    android:textSize="8.5sp"
+                    android:padding="0dp"
+                    android:layout_marginEnd="3dp" />
+
+                <Button
+                    android:id="@+id/btnSyncPieces"
+                    android:layout_width="0dp"
+                    android:layout_height="28dp"
+                    android:layout_weight="1"
+                    android:text="📷 Sync Bidak"
+                    android:backgroundTint="#7C3AED"
+                    android:textColor="#FFFFFF"
+                    android:textSize="8.5sp"
+                    android:padding="0dp" />
+            </LinearLayout>
         </LinearLayout>
     </LinearLayout>
 

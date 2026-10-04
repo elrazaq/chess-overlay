@@ -11,8 +11,8 @@ android {
         applicationId = "com.chess.overlay"
         minSdk = 26
         targetSdk = 33
-        versionCode = 21
-        versionName = "1.3.7"
+        versionCode = 22
+        versionName = "1.3.8"
 
         ndk {
             abiFilters.add("arm64-v8a")

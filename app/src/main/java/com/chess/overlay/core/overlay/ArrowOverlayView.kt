@@ -32,13 +32,47 @@ class ArrowOverlayView @JvmOverloads constructor(
     private var threats: List<MoveCandidate> = emptyList()
 
     // Mode flags
+    var isCalibrationMode: Boolean = false
     var isMappingMode: Boolean = false
     var isInputMoveMode: Boolean = false
     var selectedSquare: Square? = null
+    var activeTrackingMove: Pair<Square, Square>? = null
 
     // Callback saat petak catur disentuh dalam mode manual input
     var onSquareTapped: ((Square) -> Unit)? = null
     var onMoveDragged: ((from: Square, to: Square) -> Unit)? = null
+
+    // Paint untuk 64 Titik Motion Tracker (After Effects style)
+    private val trackerCirclePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 2.5f
+        color = Color.parseColor("#00E5FF")
+    }
+
+    private val trackerCenterDotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.WHITE
+    }
+
+    private val trackerCrosshairPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 2f
+        color = Color.parseColor("#00E5FF")
+    }
+
+    private val trackerLabelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#F1F5F9")
+        textSize = 22f
+        typeface = Typeface.DEFAULT_BOLD
+        textAlign = Paint.Align.CENTER
+    }
+
+    private val motionLinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 4f
+        color = Color.parseColor("#FACC15")
+        pathEffect = DashPathEffect(floatArrayOf(15f, 10f), 0f)
+    }
 
     // Warna untuk 5 variasi jalur terbaik Stockfish:
     // Rank 1: Cyan / Emerald terang (#00E5FF)
@@ -151,9 +185,9 @@ class ArrowOverlayView @JvmOverloads constructor(
         super.onDraw(canvas)
         val bounds = boardBounds ?: return
 
-        // 1. Gambar Grid Kalibrasi jika sedang dalam Mode Mapping
-        if (isMappingMode) {
-            drawMappingGrid(canvas, bounds)
+        // 1. Gambar 64 Titik Motion Tracker (After Effects style) saat mode Kalibrasi / Mapping aktif
+        if (isCalibrationMode || isMappingMode) {
+            draw64TrackerPoints(canvas, bounds)
         }
 
         // 2. Highlight Petak Terpilih (Source square saat menggerakkan anak catur)
@@ -214,6 +248,62 @@ class ArrowOverlayView @JvmOverloads constructor(
                 val badgeText = if (cand.isHuman) "H" else "${idx + 1}"
                 canvas.drawText(badgeText, endX, endY + badgeRadius * 0.38f, badgeTextPaint)
             }
+        }
+    }
+
+    private fun draw64TrackerPoints(canvas: Canvas, bounds: BoardBounds) {
+        val sq = bounds.squareSize
+        drawMappingGrid(canvas, bounds)
+
+        for (row in 0 until 8) {
+            for (col in 0 until 8) {
+                val file = if (bounds.isWhiteBottom) col else (7 - col)
+                val rank = if (bounds.isWhiteBottom) (7 - row) else row
+                val sqObj = Square(file, rank)
+                val (cx, cy) = bounds.getSquareCenterPixel(sqObj)
+
+                val isFrom = activeTrackingMove?.first == sqObj
+                val isTo = activeTrackingMove?.second == sqObj
+
+                val ringRadius = sq * 0.16f
+                val dotRadius = sq * 0.045f
+
+                if (isFrom) {
+                    trackerCirclePaint.color = Color.parseColor("#FACC15")
+                    trackerCirclePaint.strokeWidth = 4f
+                    trackerCrosshairPaint.color = Color.parseColor("#FACC15")
+                } else if (isTo) {
+                    trackerCirclePaint.color = Color.parseColor("#22C55E")
+                    trackerCirclePaint.strokeWidth = 4f
+                    trackerCrosshairPaint.color = Color.parseColor("#22C55E")
+                } else {
+                    trackerCirclePaint.color = Color.parseColor("#00E5FF")
+                    trackerCirclePaint.strokeWidth = 2f
+                    trackerCrosshairPaint.color = Color.parseColor("#00E5FF")
+                }
+
+                // Target Tracker: lingkaran + titik tengah
+                canvas.drawCircle(cx, cy, ringRadius, trackerCirclePaint)
+                canvas.drawCircle(cx, cy, dotRadius, trackerCenterDotPaint)
+
+                // 4 Garis Crosshair Ticks (After Effects style)
+                val tickLen = 7f
+                canvas.drawLine(cx - ringRadius - tickLen, cy, cx - ringRadius + 2f, cy, trackerCrosshairPaint)
+                canvas.drawLine(cx + ringRadius - 2f, cy, cx + ringRadius + tickLen, cy, trackerCrosshairPaint)
+                canvas.drawLine(cx, cy - ringRadius - tickLen, cx, cy - ringRadius + 2f, trackerCrosshairPaint)
+                canvas.drawLine(cx, cy + ringRadius - 2f, cx, cy + ringRadius + tickLen, trackerCrosshairPaint)
+
+                // Label Koordinat Petak (misal e4, g1, atau FROM/TO)
+                val label = if (isFrom) "FROM" else if (isTo) "TO" else sqObj.toUci()
+                canvas.drawText(label, cx, cy + ringRadius + 22f, trackerLabelPaint)
+            }
+        }
+
+        // Gambar garis lintasan tracking (trajectory) jika ada gerakan aktif
+        activeTrackingMove?.let { (fromSq, toSq) ->
+            val (fx, fy) = bounds.getSquareCenterPixel(fromSq)
+            val (tx, ty) = bounds.getSquareCenterPixel(toSq)
+            canvas.drawLine(fx, fy, tx, ty, motionLinePaint)
         }
     }
 

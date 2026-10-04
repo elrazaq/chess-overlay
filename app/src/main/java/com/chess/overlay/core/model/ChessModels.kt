@@ -34,7 +34,8 @@ data class MoveCandidate(
     val isMate: Boolean = false,
     val mateMoves: Int = 0,
     val pvLine: List<String> = emptyList(), // Notasi kelanjutan langkah
-    val isThreat: Boolean = false
+    val isThreat: Boolean = false,
+    val isHuman: Boolean = false
 )
 
 /**

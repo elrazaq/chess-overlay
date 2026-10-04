@@ -167,8 +167,8 @@ class SetupBoardView @JvmOverloads constructor(
             }
         }
 
-        // 5. Gambar hingga 5 Panah Rekomendasi Stockfish di Mini Map
-        val displayCount = candidates.size.coerceAtMost(5)
+        // 5. Gambar hingga 6 Panah Rekomendasi Stockfish di Mini Map (5 Top + 1 Human Move)
+        val displayCount = candidates.size.coerceAtMost(6)
         for (idx in (displayCount - 1) downTo 0) {
             val cand = candidates[idx]
             val fc = if (isWhiteBottom) cand.from.file else (7 - cand.from.file)
@@ -181,7 +181,11 @@ class SetupBoardView @JvmOverloads constructor(
             val tx = (tc + 0.5f) * sq
             val ty = (tr + 0.5f) * sq
 
-            val color = miniRankColors.getOrElse(idx) { Color.CYAN }
+            val color = if (cand.isHuman) {
+                Color.parseColor("#FF6D00") // Electric Fire Orange untuk Langkah Manusiawi
+            } else {
+                miniRankColors.getOrElse(idx) { Color.CYAN }
+            }
             miniArrowPaint.color = color
             miniArrowHeadPaint.color = color
             miniArrowPaint.strokeWidth = if (idx == 0) 6f else 4f

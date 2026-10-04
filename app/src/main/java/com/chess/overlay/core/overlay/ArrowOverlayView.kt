@@ -163,22 +163,29 @@ class ArrowOverlayView @JvmOverloads constructor(
             canvas.drawRect(cx - half, cy - half, cx + half, cy + half, highlightPaint)
         }
 
-        // 3. Gambar hingga 5 panah rekomendasi langkah Stockfish
+        // 3. Gambar hingga 6 panah rekomendasi langkah Stockfish (5 Top + 1 Langkah Kreatif/Manusiawi)
         // Gambar dari rank terendah ke rank 1 agar panah utama #1 berada di lapisan paling atas
-        val displayCount = candidates.size.coerceAtMost(5)
+        val displayCount = candidates.size.coerceAtMost(6)
         for (idx in (displayCount - 1) downTo 0) {
             val cand = candidates[idx]
             val (startX, startY) = bounds.getSquareCenterPixel(cand.from)
             val (endX, endY) = bounds.getSquareCenterPixel(cand.to)
 
-            val baseColor = rankColors.getOrElse(idx) { Color.CYAN }
-            val alpha = rankAlphas.getOrElse(idx) { 160 }
+            val baseColor = if (cand.isHuman) {
+                Color.parseColor("#FF6D00") // Electric Fire Orange untuk Langkah Manusiawi / Mikhail Tal style
+            } else {
+                rankColors.getOrElse(idx) { Color.CYAN }
+            }
+
+            val alpha = if (cand.isHuman) 225 else rankAlphas.getOrElse(idx) { 160 }
             val colorWithAlpha = (alpha shl 24) or (baseColor and 0x00FFFFFF)
 
             dynamicStrokePaint.color = colorWithAlpha
             dynamicHeadPaint.color = colorWithAlpha
 
-            val shaftFactor = when (idx) {
+            val shaftFactor = if (cand.isHuman) {
+                0.13f
+            } else when (idx) {
                 0 -> 0.20f
                 1 -> 0.16f
                 2 -> 0.14f
@@ -198,13 +205,14 @@ class ArrowOverlayView @JvmOverloads constructor(
                 headSize = bounds.squareSize * (shaftFactor * 2.1f)
             )
 
-            // Tampilkan nomor badge #1 - #5 pada ujung petak tujuan
+            // Tampilkan nomor badge #1 - #5 atau badge "H" untuk langkah kreatif/manusiawi
             if (displayCount > 1) {
                 val badgeRadius = bounds.squareSize * 0.15f
                 badgeCirclePaint.color = baseColor
                 badgeTextPaint.textSize = badgeRadius * 1.3f
                 canvas.drawCircle(endX, endY, badgeRadius, badgeCirclePaint)
-                canvas.drawText("${idx + 1}", endX, endY + badgeRadius * 0.38f, badgeTextPaint)
+                val badgeText = if (cand.isHuman) "H" else "${idx + 1}"
+                canvas.drawText(badgeText, endX, endY + badgeRadius * 0.38f, badgeTextPaint)
             }
         }
     }

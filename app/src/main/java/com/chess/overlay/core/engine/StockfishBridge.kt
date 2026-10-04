@@ -58,7 +58,7 @@ class StockfishBridge(
             // Konfigurasi performa hemat daya
             sendCommand("setoption name Threads value $threads")
             sendCommand("setoption name Hash value $hashMb")
-            sendCommand("setoption name MultiPV value 5")
+            sendCommand("setoption name MultiPV value 6")
             sendCommand("isready")
 
             // Tunggu hingga Stockfish menjawab readyok agar buffer bersih
@@ -142,7 +142,7 @@ class StockfishBridge(
             } catch (_: Exception) {}
         }
 
-        return@withContext candidates.values.sortedBy { it.rankOrder }.take(5)
+        return@withContext candidates.values.sortedBy { it.rankOrder }.take(6)
     }
 
 

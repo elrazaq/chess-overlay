@@ -59,7 +59,20 @@
         android:orientation="vertical"
         android:layout_marginTop="4dp">
 
-        <!-- Top Candidates List (#1 & #2) -->
+        <!-- Mode Switch: Auto Vision vs Manual -->
+        <Button
+            android:id="@+id/btnToggleMode"
+            android:layout_width="match_parent"
+            android:layout_height="30dp"
+            android:text="⚡ Mode: Auto Vision (Bullet)"
+            android:textColor="#FFFFFF"
+            android:backgroundTint="#2563EB"
+            android:textSize="9.5sp"
+            android:textStyle="bold"
+            android:padding="0dp"
+            android:layout_marginBottom="3dp" />
+
+        <!-- Top Candidates List (#1 to #5 + #H) -->
         <LinearLayout
             android:id="@+id/linesContainer"
             android:layout_width="match_parent"
@@ -108,10 +121,20 @@
                 android:textColor="#94A3B8"
                 android:textSize="10sp"
                 android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/tvLineHuman"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="#FF6D00"
+                android:textSize="10sp"
+                android:textStyle="bold"
+                android:visibility="gone" />
         </LinearLayout>
 
         <!-- Pengaturan Jeda Waktu Gerak Bebas (Default: 3 Detik) -->
         <LinearLayout
+            android:id="@+id/delayContainer"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:gravity="center_vertical"

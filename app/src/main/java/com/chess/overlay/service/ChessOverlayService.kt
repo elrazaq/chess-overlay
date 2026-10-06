@@ -36,7 +36,6 @@ import com.chess.overlay.core.overlay.ArrowOverlayView
 import com.chess.overlay.core.overlay.SetupBoardView
 import com.chess.overlay.core.overlay.SetupTool
 import kotlinx.coroutines.*
-import kotlin.math.abs
 import kotlin.math.hypot
 
 class ChessOverlayService : Service() {
@@ -58,20 +57,25 @@ class ChessOverlayService : Service() {
     private lateinit var stockfishEngine: StockfishBridge
     private var currentCandidates: List<MoveCandidate> = emptyList()
 
-    // Mode: HOLD (Tombol Tahan Layar) vs MINI BOARD (Manual Panel)
-    private var isHoldMode = true
+    // Mode: 1-Tap Auto-Lepas vs Jeda Timer
+    private var isHoldMode = true // true = 1-Tap Auto-Lepas, false = Jeda Timer
+    private var isMappingActive = false
     private var isEngineRunning = false
     private var isPanelMinimized = false
     private var isCalibrationVisible = false
     private var isWhiteBottom = true
     private var isPerspectiveManuallySet = false
 
+    // Jeda Waktu Gerak Bebas (Mode Jeda Timer)
+    private var delayDurationSeconds = 3
+    private var countdownJob: Job? = null
+
     // Kalibrasi posisi & ukuran papan catur di layar
     private var boardTopY = 480f
     private var boardWidth = 1080f
     private var currentBoardBounds: BoardBounds? = null
 
-    // Posisi tombol bulat mengambang (HOLD Button)
+    // Posisi tombol bulat mengambang (1-Tap Button)
     private var holdButtonX = 30
     private var holdButtonY = 850
 
@@ -110,6 +114,7 @@ class ChessOverlayService : Service() {
         boardWidth = prefs.getFloat("saved_board_width", defaultWidth)
         boardTopY = prefs.getFloat("saved_board_top_y", defaultTopY)
         isWhiteBottom = prefs.getBoolean("saved_is_white_bottom", true)
+        delayDurationSeconds = prefs.getInt("saved_delay_duration", 3)
         holdButtonX = prefs.getInt("saved_hold_btn_x", 30)
         holdButtonY = prefs.getInt("saved_hold_btn_y", (metrics.heightPixels * 0.55f).toInt())
 
@@ -122,6 +127,7 @@ class ChessOverlayService : Service() {
             .putFloat("saved_board_width", boardWidth)
             .putFloat("saved_board_top_y", boardTopY)
             .putBoolean("saved_is_white_bottom", isWhiteBottom)
+            .putInt("saved_delay_duration", delayDurationSeconds)
             .putInt("saved_hold_btn_x", holdButtonX)
             .putInt("saved_hold_btn_y", holdButtonY)
             .apply()
@@ -211,7 +217,7 @@ class ChessOverlayService : Service() {
             setupPanelTouchAndControls(panelParams)
             wm.addView(panelView, panelParams)
 
-            // 3. Floating Draggable Circular HOLD Button
+            // 3. Floating Draggable Circular 1-Tap Button
             val holdInflater = LayoutInflater.from(themedContext)
             holdButtonView = holdInflater.inflate(R.layout.floating_hold_button, null)
 
@@ -238,17 +244,14 @@ class ChessOverlayService : Service() {
     }
 
     /**
-     * Konfigurasi Tombol Bulat HOLD:
-     * - TAHAN JARI (ACTION_DOWN): Layar seketika masuk Mode Mapping (menangkap tap 2 kali di papan).
-     * - LEPAS JARI (ACTION_UP): Layar seketika 100% TEMBUS SENTUH ke aplikasi Chess.com.
+     * Konfigurasi Tombol Bulat 1-Tap Toggle:
+     * - TAP SEKALI: Masuk Mode Mapping (menangkap tap 2x di papan).
+     * - SETELAH 2x TAP: Otomatis LEPAS seketika (100% tembus sentuh).
      * - DRAG: Dapat digeser kemana saja di layar agar pas di jangkauan jempol.
      */
     @SuppressLint("ClickableViewAccessibility", "SetTextI18n")
     private fun setupHoldButtonTouchAndDrag(params: WindowManager.LayoutParams) {
         val button = holdButtonView ?: return
-        val container = button.findViewById<FrameLayout>(R.id.holdButtonContainer)
-        val tvIcon = button.findViewById<TextView>(R.id.tvHoldIcon)
-        val tvLabel = button.findViewById<TextView>(R.id.tvHoldLabel)
 
         button.setOnTouchListener(object : View.OnTouchListener {
             private var initialX = 0
@@ -265,17 +268,6 @@ class ChessOverlayService : Service() {
                         initialTouchX = event.rawX
                         initialTouchY = event.rawY
                         isDragging = false
-
-                        // AKTIFKAN MAPPING (TEKAN & TAHAN)
-                        vibrateDevice(25)
-                        container.setBackgroundResource(R.drawable.bg_hold_button_active)
-                        tvIcon.text = "🖐️"
-                        tvLabel.text = "MAPPING"
-                        tvLabel.setTextColor(Color.WHITE)
-
-                        setArrowOverlayTouchable(true)
-                        arrowOverlayView?.isInputMoveMode = true
-                        panelView?.findViewById<TextView>(R.id.tvEngineTitle)?.text = "🖐️ TAHAN AKTIF: Tap Petak Papan!"
                         return true
                     }
                     MotionEvent.ACTION_MOVE -> {
@@ -291,26 +283,14 @@ class ChessOverlayService : Service() {
                         }
                         return true
                     }
-                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                        // LEPAS TOMBOL -> 100% TEMBUS SENTUH KEMBALI
-                        container.setBackgroundResource(R.drawable.bg_hold_button_idle)
-                        tvIcon.text = "🎯"
-                        tvLabel.text = "TAHAN"
-                        tvLabel.setTextColor(Color.parseColor("#38BDF8"))
-
-                        setArrowOverlayTouchable(false)
-                        arrowOverlayView?.isInputMoveMode = false
-                        sourceSquare = null
-                        arrowOverlayView?.selectedSquare = null
-                        arrowOverlayView?.invalidate()
-
-                        val sideText = if (boardState.isWhiteToMove) "Putih" else "Hitam"
-                        panelView?.findViewById<TextView>(R.id.tvEngineTitle)?.text = "🎯 Giliran $sideText (Hold: Tembus)"
-
+                    MotionEvent.ACTION_UP -> {
                         if (isDragging) {
                             holdButtonX = params.x
                             holdButtonY = params.y
                             saveCalibrationPrefs()
+                        } else {
+                            // TAP SEKALI: TOGGLE MAPPING
+                            toggleMappingMode()
                         }
                         return true
                     }
@@ -318,6 +298,60 @@ class ChessOverlayService : Service() {
                 return false
             }
         })
+    }
+
+    private fun toggleMappingMode() {
+        if (!isEngineRunning) {
+            Toast.makeText(this, "Tekan START terlebih dahulu!", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (isMappingActive) {
+            disableMappingMode()
+            Toast.makeText(this, "Mode Tembus Sentuh (Bebas)", Toast.LENGTH_SHORT).show()
+        } else {
+            enableMappingMode()
+            Toast.makeText(this, "Mode Mapping Aktif: Tap 2x di papan!", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun enableMappingMode() {
+        isMappingActive = true
+        vibrateDevice(25)
+        val button = holdButtonView
+        val container = button?.findViewById<FrameLayout>(R.id.holdButtonContainer)
+        val tvIcon = button?.findViewById<TextView>(R.id.tvHoldIcon)
+        val tvLabel = button?.findViewById<TextView>(R.id.tvHoldLabel)
+
+        container?.setBackgroundResource(R.drawable.bg_hold_button_active)
+        tvIcon?.text = "🖐️"
+        tvLabel?.text = "AKTIF"
+        tvLabel?.setTextColor(Color.WHITE)
+
+        setArrowOverlayTouchable(true)
+        arrowOverlayView?.isInputMoveMode = true
+        panelView?.findViewById<TextView>(R.id.tvEngineTitle)?.text = "🖐️ MAPPING: Tap 2x di Papan!"
+    }
+
+    private fun disableMappingMode() {
+        isMappingActive = false
+        val button = holdButtonView
+        val container = button?.findViewById<FrameLayout>(R.id.holdButtonContainer)
+        val tvIcon = button?.findViewById<TextView>(R.id.tvHoldIcon)
+        val tvLabel = button?.findViewById<TextView>(R.id.tvHoldLabel)
+
+        container?.setBackgroundResource(R.drawable.bg_hold_button_idle)
+        tvIcon?.text = "🎯"
+        tvLabel?.text = "TAP MAP"
+        tvLabel?.setTextColor(Color.parseColor("#38BDF8"))
+
+        setArrowOverlayTouchable(false)
+        arrowOverlayView?.isInputMoveMode = false
+        sourceSquare = null
+        arrowOverlayView?.selectedSquare = null
+        arrowOverlayView?.invalidate()
+
+        val sideText = if (boardState.isWhiteToMove) "Putih" else "Hitam"
+        panelView?.findViewById<TextView>(R.id.tvEngineTitle)?.text = "🎯 Giliran $sideText (Tembus)"
     }
 
     @SuppressLint("ClickableViewAccessibility", "SetTextI18n")
@@ -329,16 +363,48 @@ class ChessOverlayService : Service() {
         val btnToggleEngine = view.findViewById<Button>(R.id.btnToggleEngine)
         val btnMinimize = view.findViewById<TextView>(R.id.btnToggleMinimize)
         val btnToggleMode = view.findViewById<Button>(R.id.btnToggleMode)
+        val delayContainer = view.findViewById<LinearLayout>(R.id.delayContainer)
+
+        // Pengatur Jeda Detik (Mode Jeda Timer)
+        val btnDelayMinus = view.findViewById<Button>(R.id.btnDelayMinus)
+        val btnDelayPlus = view.findViewById<Button>(R.id.btnDelayPlus)
+        val tvDelayDuration = view.findViewById<TextView>(R.id.tvDelayDuration)
+        tvDelayDuration.text = "${delayDurationSeconds} dtk"
+
+        btnDelayMinus.setOnClickListener {
+            if (delayDurationSeconds > 1) {
+                delayDurationSeconds--
+                tvDelayDuration.text = "${delayDurationSeconds} dtk"
+                saveCalibrationPrefs()
+                Toast.makeText(this, "Jeda gerak bebas: ${delayDurationSeconds} detik", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        btnDelayPlus.setOnClickListener {
+            if (delayDurationSeconds < 15) {
+                delayDurationSeconds++
+                tvDelayDuration.text = "${delayDurationSeconds} dtk"
+                saveCalibrationPrefs()
+                Toast.makeText(this, "Jeda gerak bebas: ${delayDurationSeconds} detik", Toast.LENGTH_SHORT).show()
+            }
+        }
 
         fun updateModeUI() {
             if (isHoldMode) {
-                btnToggleMode.text = "🎯 MODE: HOLD (TOMBOL TAHAN)"
+                btnToggleMode.text = "🎯 MODE: 1-TAP (AUTO-LEPAS)"
                 btnToggleMode.setBackgroundColor(Color.parseColor("#059669"))
                 holdButtonView?.visibility = if (isEngineRunning) View.VISIBLE else View.GONE
+                delayContainer.visibility = View.GONE
+                countdownJob?.cancel()
+                disableMappingMode()
             } else {
-                btnToggleMode.text = "♟️ MODE: MINI BOARD (MANUAL)"
+                btnToggleMode.text = "⏳ MODE: JEDA TIMER (COUNTDOWN)"
                 btnToggleMode.setBackgroundColor(Color.parseColor("#2563EB"))
                 holdButtonView?.visibility = View.GONE
+                delayContainer.visibility = View.VISIBLE
+                if (isEngineRunning) {
+                    startFreeMoveDelay(delayDurationSeconds, isResumeBuffer = true)
+                }
             }
         }
         updateModeUI()
@@ -346,11 +412,10 @@ class ChessOverlayService : Service() {
         btnToggleMode.setOnClickListener {
             isHoldMode = !isHoldMode
             updateModeUI()
-            setArrowOverlayTouchable(false)
             if (isHoldMode) {
-                Toast.makeText(this, "Mode HOLD Aktif: Tekan & Tahan tombol 🎯 untuk mapping catur!", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Mode 1-Tap: Tekan tombol 🎯 sekali, tap 2x di papan -> otomatis lepas!", Toast.LENGTH_LONG).show()
             } else {
-                Toast.makeText(this, "Mode Mini Board: Gerakkan bidak langsung di papan mini!", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Mode Jeda Timer: Jeda ${delayDurationSeconds}s sebelum mode sentuh overlay.", Toast.LENGTH_LONG).show()
             }
         }
 
@@ -432,14 +497,17 @@ class ChessOverlayService : Service() {
                 calculateStockfishMoves()
                 if (isHoldMode) {
                     holdButtonView?.visibility = View.VISIBLE
+                    disableMappingMode()
+                    Toast.makeText(this, "Game Dimulai! Tekan tombol 🎯 untuk mapping.", Toast.LENGTH_SHORT).show()
+                } else {
+                    holdButtonView?.visibility = View.GONE
+                    startFreeMoveDelay(delayDurationSeconds, isResumeBuffer = true)
+                    Toast.makeText(this, "Game Dimulai! Jeda ${delayDurationSeconds}s sebelum mode sentuh.", Toast.LENGTH_SHORT).show()
                 }
-                setArrowOverlayTouchable(false)
-                val sideText = if (boardState.isWhiteToMove) "Putih" else "Hitam"
-                tvEngineTitle.text = "🎯 Giliran $sideText (Hold: Tembus)"
-                Toast.makeText(this, "Game Dimulai! Tahan tombol 🎯 untuk mapping.", Toast.LENGTH_SHORT).show()
             } else {
                 btnToggleEngine.text = "▶️ START"
                 btnToggleEngine.setBackgroundColor(getColor(R.color.accent))
+                countdownJob?.cancel()
                 setArrowOverlayTouchable(false)
                 holdButtonView?.visibility = View.GONE
                 tvEngineTitle.text = "Engine Dijeda (Sentuhan Bebas)"
@@ -506,6 +574,7 @@ class ChessOverlayService : Service() {
 
         // Reset Board ke Posisi Standar 32 Bidak
         btnReset.setOnClickListener {
+            countdownJob?.cancel()
             boardState.resetToStartingPosition()
             setupBoard.selectedSquare = null
             setupBoard.candidates = emptyList()
@@ -514,6 +583,9 @@ class ChessOverlayService : Service() {
             updateMoveHistoryDisplay()
             if (isEngineRunning) {
                 calculateStockfishMoves()
+                if (!isHoldMode) {
+                    startFreeMoveDelay(delayDurationSeconds, isResumeBuffer = true)
+                }
             }
             Toast.makeText(this, "Papan catur direset ke posisi awal (32 bidak)", Toast.LENGTH_SHORT).show()
         }
@@ -638,8 +710,11 @@ class ChessOverlayService : Service() {
             calculateStockfishMoves()
             if (isHoldMode) {
                 holdButtonView?.visibility = View.VISIBLE
+                disableMappingMode()
+            } else {
+                holdButtonView?.visibility = View.GONE
+                startFreeMoveDelay(delayDurationSeconds, isResumeBuffer = true)
             }
-            setArrowOverlayTouchable(false)
             Toast.makeText(this, "Posisi disimpan!", Toast.LENGTH_SHORT).show()
         }
 
@@ -685,6 +760,50 @@ class ChessOverlayService : Service() {
     }
 
     /**
+     * Memulai jeda waktu gerak bebas (Mode Jeda Timer).
+     * Selama countdown berlangsung, overlay 100% tembus sentuh.
+     */
+    @SuppressLint("SetTextI18n")
+    private fun startFreeMoveDelay(seconds: Int, isResumeBuffer: Boolean = false) {
+        countdownJob?.cancel()
+        setArrowOverlayTouchable(false)
+
+        countdownJob = serviceScope.launch {
+            val view = panelView ?: return@launch
+            val tvEngineTitle = view.findViewById<TextView>(R.id.tvEngineTitle)
+
+            for (sec in seconds downTo 1) {
+                if (!isEngineRunning) return@launch
+                val prefix = if (isResumeBuffer) "Persiapan" else "Gerak Bidak!"
+                tvEngineTitle.text = "🎮 $prefix (${sec}s)"
+                delay(1000)
+            }
+
+            if (isEngineRunning && !isHoldMode) {
+                enterTimerMappingMode()
+            }
+        }
+    }
+
+    /**
+     * Mengaktifkan Mode Mapping saat jeda waktu timer habis (Mode Jeda Timer).
+     */
+    @SuppressLint("SetTextI18n")
+    private fun enterTimerMappingMode() {
+        if (!isEngineRunning || isHoldMode) return
+        countdownJob?.cancel()
+        countdownJob = null
+
+        setArrowOverlayTouchable(true)
+        arrowOverlayView?.isInputMoveMode = true
+
+        val view = panelView ?: return
+        val tvEngineTitle = view.findViewById<TextView>(R.id.tvEngineTitle)
+        val sideText = if (boardState.isWhiteToMove) "Putih" else "Hitam"
+        tvEngineTitle.text = "🖐️ Giliran $sideText: Tap Petak"
+    }
+
+    /**
      * Mengatur apakah Fullscreen Arrow Overlay menangkap sentuhan (true) atau tembus 100% (false)
      */
     private fun setArrowOverlayTouchable(touchable: Boolean) {
@@ -704,7 +823,7 @@ class ChessOverlayService : Service() {
     }
 
     /**
-     * Eksekusi sentuhan petak catur (2x tap: From -> To) saat mode HOLD aktif
+     * Eksekusi sentuhan petak catur (2x tap: From -> To)
      */
     private fun handleSquareTapped(square: Square) {
         if (sourceSquare == null) {
@@ -747,9 +866,14 @@ class ChessOverlayService : Service() {
             calculateStockfishMoves()
             vibrateDevice(35)
 
-            val sideText = if (boardState.isWhiteToMove) "Putih" else "Hitam"
-            panelView?.findViewById<TextView>(R.id.tvEngineTitle)?.let {
-                it.text = "🎯 Giliran $sideText"
+            if (isEngineRunning) {
+                if (isHoldMode) {
+                    // MODE 1-TAP: Otomatis LEPAS seketika agar pemain bebas gerak di Chess.com!
+                    disableMappingMode()
+                } else {
+                    // MODE JEDA TIMER: Mulai jeda waktu bebas gerak
+                    startFreeMoveDelay(delayDurationSeconds, isResumeBuffer = false)
+                }
             }
             return true
         } else {
@@ -875,7 +999,7 @@ class ChessOverlayService : Service() {
         createNotificationChannel()
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Chess Vision Overlay Aktif")
-            .setContentText("Mode HOLD & Analisis Catur Siap")
+            .setContentText("Mode 1-Tap & Analisis Catur Siap")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
@@ -900,6 +1024,7 @@ class ChessOverlayService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         serviceScope.cancel()
+        countdownJob?.cancel()
         try {
             if (holdButtonView != null) {
                 windowManager?.removeView(holdButtonView)

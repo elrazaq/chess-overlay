@@ -59,12 +59,12 @@
         android:orientation="vertical"
         android:layout_marginTop="4dp">
 
-        <!-- Mode Switch: Mode HOLD (Tombol Tahan) vs Mode Mini Board -->
+        <!-- Mode Switch: Mode 1-Tap Auto-Lepas vs Mode Jeda Timer -->
         <Button
             android:id="@+id/btnToggleMode"
             android:layout_width="match_parent"
             android:layout_height="30dp"
-            android:text="🎯 MODE: HOLD (TOMBOL TAHAN)"
+            android:text="🎯 MODE: 1-TAP (AUTO-LEPAS)"
             android:textColor="#FFFFFF"
             android:backgroundTint="#059669"
             android:textSize="9.5sp"
@@ -130,6 +130,54 @@
                 android:textSize="10sp"
                 android:textStyle="bold"
                 android:visibility="gone" />
+        </LinearLayout>
+
+        <!-- Pengaturan Jeda Waktu Gerak Bebas (Mode Jeda Timer) -->
+        <LinearLayout
+            android:id="@+id/delayContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="4dp"
+            android:paddingVertical="3dp"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="⏳ Jeda Gerak Bebas:"
+                android:textColor="#94A3B8"
+                android:textSize="9.5sp" />
+
+            <Button
+                android:id="@+id/btnDelayMinus"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="26dp"
+                android:layout_height="24dp"
+                android:text="➖"
+                android:textSize="7sp"
+                android:padding="0dp" />
+
+            <TextView
+                android:id="@+id/tvDelayDuration"
+                android:layout_width="32dp"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:text="3 dtk"
+                android:textColor="#38BDF8"
+                android:textSize="10sp"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/btnDelayPlus"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="26dp"
+                android:layout_height="24dp"
+                android:text="➕"
+                android:textSize="7sp"
+                android:padding="0dp" />
         </LinearLayout>
 
         <!-- Live Move History Display -->

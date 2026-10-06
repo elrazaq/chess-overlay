@@ -21,6 +21,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.Button
+import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -335,6 +336,7 @@ class ChessOverlayService : Service() {
         // Actions
         val btnApply = view.findViewById<Button>(R.id.btnApplyBestMove)
         val btnUndo = view.findViewById<Button>(R.id.btnUndoMove)
+        val btnRedo = view.findViewById<Button>(R.id.btnRedoMove)
         val btnFlip = view.findViewById<Button>(R.id.btnFlipBoard)
         val btnReset = view.findViewById<Button>(R.id.btnResetBoard)
         val btnToggleSetup = view.findViewById<Button>(R.id.btnToggleSetup)
@@ -445,11 +447,35 @@ class ChessOverlayService : Service() {
                 setupBoardView?.candidates = emptyList()
                 setupBoardView?.invalidate()
                 arrowOverlayView?.invalidate()
+                updateMoveHistoryDisplay()
                 if (!isAutoVisionMode) {
                     enterMappingMode()
                 }
                 calculateStockfishMoves()
                 Toast.makeText(this, "Langkah di-undo ↩️", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        // Redo Move
+        btnRedo?.setOnClickListener {
+            val redone = boardState.redoMove()
+            if (redone) {
+                lastExecutedMove = null
+                lastProcessedMoveSignature = ""
+                sourceSquare = null
+                arrowOverlayView?.selectedSquare = null
+                setupBoardView?.selectedSquare = null
+                setupBoardView?.candidates = emptyList()
+                setupBoardView?.invalidate()
+                arrowOverlayView?.invalidate()
+                updateMoveHistoryDisplay()
+                if (!isAutoVisionMode) {
+                    enterMappingMode()
+                }
+                calculateStockfishMoves()
+                Toast.makeText(this, "Langkah di-redo ↪️", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "Tidak ada langkah untuk di-redo", Toast.LENGTH_SHORT).show()
             }
         }
 
@@ -476,6 +502,7 @@ class ChessOverlayService : Service() {
             setupBoard.candidates = emptyList()
             setupBoard.invalidate()
             arrowOverlayView?.clearOverlay()
+            updateMoveHistoryDisplay()
             if (isEngineRunning) {
                 calculateStockfishMoves()
                 if (!isAutoVisionMode) {
@@ -516,11 +543,13 @@ class ChessOverlayService : Service() {
             boardState.clearBoard()
             setupBoard.invalidate()
             arrowOverlayView?.clearOverlay()
+            updateMoveHistoryDisplay()
         }
 
         btnSetupDefault32.setOnClickListener {
             boardState.resetToStartingPosition()
             setupBoard.invalidate()
+            updateMoveHistoryDisplay()
         }
 
         btnSetupTurn.text = if (boardState.isWhiteToMove) "Giliran: Putih" else "Giliran: Hitam"
@@ -683,6 +712,8 @@ class ChessOverlayService : Service() {
             saveCalibrationPrefs()
             arrowOverlayView?.invalidate()
         }
+
+        updateMoveHistoryDisplay()
     }
 
     /**
@@ -857,6 +888,7 @@ class ChessOverlayService : Service() {
             setupBoardView?.candidates = emptyList()
             setupBoardView?.invalidate()
             arrowOverlayView?.invalidate()
+            updateMoveHistoryDisplay()
 
             // Hitung rekomendasi langkah berikutnya
             calculateStockfishMoves()
@@ -948,7 +980,9 @@ class ChessOverlayService : Service() {
                             val sign = if (cand.scoreCp >= 0) "+" else ""
                             String.format("%s%.1f", sign, cand.scoreCp / 100.0)
                         }
-                        val movesString = cand.pvLine.take(4).joinToString(" ")
+                        val primarySan = boardState.moveToSan(cand.from, cand.to)
+                        val continuation = cand.pvLine.drop(1).take(3).joinToString(" ")
+                        val movesString = if (continuation.isNotEmpty()) "$primarySan ($continuation)" else primarySan
                         textViews[i]?.text = "#${i + 1} [$scoreText] $movesString"
                         textViews[i]?.visibility = View.VISIBLE
                     } else {
@@ -963,7 +997,9 @@ class ChessOverlayService : Service() {
                         val sign = if (humanCandidate.scoreCp >= 0) "+" else ""
                         String.format("%s%.1f", sign, humanCandidate.scoreCp / 100.0)
                     }
-                    val movesString = humanCandidate.pvLine.take(4).joinToString(" ")
+                    val primarySan = boardState.moveToSan(humanCandidate.from, humanCandidate.to)
+                    val continuation = humanCandidate.pvLine.drop(1).take(3).joinToString(" ")
+                    val movesString = if (continuation.isNotEmpty()) "$primarySan ($continuation)" else primarySan
                     tvLineHuman?.text = "🎯 #H [Manusiawi/Tal] [$scoreText] $movesString"
                     tvLineHuman?.visibility = View.VISIBLE
                 } else {
@@ -987,6 +1023,17 @@ class ChessOverlayService : Service() {
             currentBoardBounds?.let { bounds ->
                 arrowOverlayView?.updateAnalysis(bounds, candidates, emptyList())
             }
+        }
+    }
+
+    private fun updateMoveHistoryDisplay() {
+        val view = panelView ?: return
+        val tvMoveHistory = view.findViewById<TextView>(R.id.tvMoveHistory) ?: return
+        val scrollMoveHistory = view.findViewById<HorizontalScrollView>(R.id.scrollMoveHistory)
+        val historyStr = boardState.getFormattedMoveHistory()
+        tvMoveHistory.text = if (historyStr.isBlank()) "📜 Riwayat: Belum ada langkah" else "📜 $historyStr"
+        scrollMoveHistory?.post {
+            scrollMoveHistory.fullScroll(View.FOCUS_RIGHT)
         }
     }
 

@@ -35,7 +35,8 @@ class BoardState {
     // col 0 = file a (kiri), col 7 = file h (kanan)
     private val grid = Array(8) { Array<Piece?>(8) { null } }
     var isWhiteToMove: Boolean = true
-    private val moveHistory = mutableListOf<MoveRecord>()
+    val moveHistory = mutableListOf<MoveRecord>()
+    val redoHistory = mutableListOf<MoveRecord>()
 
     init {
         resetToStartingPosition()
@@ -52,6 +53,7 @@ class BoardState {
             }
         }
         moveHistory.clear()
+        redoHistory.clear()
         isWhiteToMove = true
 
         // Rank 8 (Black pieces): row 0
@@ -415,6 +417,7 @@ class BoardState {
                 isPromotion = isPromotion
             )
         )
+        redoHistory.clear()
 
         // Ganti giliran jalan
         isWhiteToMove = !isWhiteToMove
@@ -427,7 +430,17 @@ class BoardState {
      */
     fun findMoveForSan(sanText: String, forcedTurn: Boolean? = null): Pair<Square, Square>? {
         val turn = forcedTurn ?: isWhiteToMove
-        val clean = sanText.trim().replace("+", "").replace("#", "")
+        var clean = sanText.trim().replace("+", "").replace("#", "")
+            .trim('<', '>', '[', ']', '(', ')', '{', '}', '|', '_', ':', ';', '!', '"', '\'')
+
+        // 1. Simbol unicode bidak catur
+        clean = clean.replace("♞", "N").replace("♘", "N")
+            .replace("♝", "B").replace("♗", "B")
+            .replace("♜", "R").replace("♖", "R")
+            .replace("♛", "Q").replace("♕", "Q")
+            .replace("♚", "K").replace("♔", "K")
+
+        // 2. Rokade
         if (clean.equals("O-O", ignoreCase = true) || clean == "0-0") {
             val rank = if (turn) 0 else 7
             val from = Square(4, rank)
@@ -447,31 +460,45 @@ class BoardState {
             } else null
         }
 
-        // Cari target petak [a-h][1-8]
+        // 3. Cari target petak [a-h][1-8]
         val targetMatch = Regex("([a-h][1-8])", RegexOption.IGNORE_CASE).findAll(clean).lastOrNull() ?: return null
         val targetUci = targetMatch.value.lowercase()
         val targetSquare = Square.fromUci(targetUci)
 
-        // Tentukan hint jenis bidak (N, B, R, Q, K atau pion jika huruf kecil)
+        // 4. Deteksi jenis bidak (Piece Hint) dari awalan teks (prefix)
         var pieceHint: PieceType? = null
         var fileHint: Char? = null
         var rankHint: Char? = null
 
-        val prefix = clean.substring(0, targetMatch.range.first)
-        for (ch in prefix) {
-            when (ch.uppercaseChar()) {
-                'N', '♞', '♘' -> pieceHint = PieceType.KNIGHT
-                'B', '♝', '♗' -> pieceHint = PieceType.BISHOP
-                'R', '♜', '♖' -> pieceHint = PieceType.ROOK
-                'Q', '♛', '♕' -> pieceHint = PieceType.QUEEN
-                'K', '♚', '♔' -> pieceHint = PieceType.KING
-                in 'a'..'h' -> fileHint = ch.lowercaseChar()
-                in '1'..'8' -> rankHint = ch
+        val prefix = clean.substring(0, targetMatch.range.first).lowercase()
+
+        // Deteksi kata lengkap jika ada (misal "queen xe2", "kuda f6", "bishop c4")
+        if (prefix.contains("queen") || prefix.contains("ratu") || prefix.contains("menteri")) {
+            pieceHint = PieceType.QUEEN
+        } else if (prefix.contains("knight") || prefix.contains("kuda")) {
+            pieceHint = PieceType.KNIGHT
+        } else if (prefix.contains("bishop") || prefix.contains("gajah") || prefix.contains("peluncur")) {
+            pieceHint = PieceType.BISHOP
+        } else if (prefix.contains("rook") || prefix.contains("benteng")) {
+            pieceHint = PieceType.ROOK
+        } else if (prefix.contains("king") || prefix.contains("raja")) {
+            pieceHint = PieceType.KING
+        } else {
+            for (ch in prefix) {
+                when (ch) {
+                    'n', '2', 'z' -> pieceHint = PieceType.KNIGHT
+                    'b', '8' -> pieceHint = PieceType.BISHOP
+                    'r' -> pieceHint = PieceType.ROOK
+                    'q', 'w', '0', 'o', 'v' -> pieceHint = PieceType.QUEEN
+                    'k' -> pieceHint = PieceType.KING
+                    in 'a'..'h' -> fileHint = ch
+                    in '1'..'8' -> rankHint = ch
+                }
             }
         }
-        if (pieceHint == null && fileHint == null && (prefix.isEmpty() || prefix.contains("x", ignoreCase = true))) {
-            pieceHint = PieceType.PAWN
-        }
+
+        val tryPawnFirst = (pieceHint == null)
+        val effectiveHint = pieceHint ?: PieceType.PAWN
 
         val candidates = mutableListOf<Square>()
         for (r in 0..7) {
@@ -479,7 +506,7 @@ class BoardState {
                 val sq = Square(f, r)
                 val p = getPiece(sq) ?: continue
                 if (p.isWhite != turn) continue
-                if (pieceHint != null && p.type != pieceHint) continue
+                if (p.type != effectiveHint) continue
                 if (fileHint != null && ('a' + f) != fileHint) continue
                 if (rankHint != null && ('1' + r) != rankHint) continue
 
@@ -492,6 +519,28 @@ class BoardState {
         if (candidates.isNotEmpty()) {
             if (forcedTurn != null) isWhiteToMove = forcedTurn
             return Pair(candidates[0], targetSquare)
+        }
+
+        // JIKA pieceHint tidak disebutkan (awalan kosong / OCR melewatkan simbol ikon perwira)
+        // dan tidak ada pion yang bisa melangkah ke targetSquare:
+        // Cari perwira mana yang bisa melangkah ke petak tersebut (misal King ke e2, Bishop ke e7, Queen ke d4)!
+        if (tryPawnFirst) {
+            val nonPawnCandidates = mutableListOf<Square>()
+            for (r in 0..7) {
+                for (f in 0..7) {
+                    val sq = Square(f, r)
+                    val p = getPiece(sq) ?: continue
+                    if (p.isWhite != turn) continue
+                    if (p.type == PieceType.PAWN) continue
+                    if (isValidMove(sq, targetSquare, ignoreTurnCheck = true)) {
+                        nonPawnCandidates.add(sq)
+                    }
+                }
+            }
+            if (nonPawnCandidates.size == 1) {
+                if (forcedTurn != null) isWhiteToMove = forcedTurn
+                return Pair(nonPawnCandidates[0], targetSquare)
+            }
         }
 
         // Jika tidak ditemukan pada giliran ini, coba auto-sync dengan giliran lawan (1 langkah desync)
@@ -613,8 +662,96 @@ class BoardState {
             }
         }
 
+        redoHistory.add(last)
         isWhiteToMove = last.prevTurn
         return true
+    }
+
+    /**
+     * Mengulang kembali (Redo) langkah yang baru saja di-undo.
+     */
+    fun redoMove(): Boolean {
+        if (redoHistory.isEmpty()) return false
+        val next = redoHistory.removeAt(redoHistory.size - 1)
+
+        val fromRow = 7 - next.from.rank
+        val fromCol = next.from.file
+        val toRow = 7 - next.to.rank
+        val toCol = next.to.file
+
+        grid[toRow][toCol] = next.movedPiece
+        grid[fromRow][fromCol] = null
+
+        // Terapkan rokade jika ada
+        if (next.isCastling) {
+            if (next.to.file == 6) {
+                grid[fromRow][5] = grid[fromRow][7]
+                grid[fromRow][7] = null
+            } else if (next.to.file == 2) {
+                grid[fromRow][3] = grid[fromRow][0]
+                grid[fromRow][0] = null
+            }
+        }
+
+        moveHistory.add(next)
+        isWhiteToMove = !next.prevTurn
+        return true
+    }
+
+    /**
+     * Mengonversi langkah catur (from, to) ke notasi standar SAN (misal: "Nf3", "Qxe2+", "e4", "O-O").
+     */
+    fun moveToSan(from: Square, to: Square): String {
+        val piece = getPiece(from) ?: return "${from.toUci()}${to.toUci()}"
+        val isCapture = getPiece(to) != null
+
+        if (piece.type == PieceType.KING && Math.abs(to.file - from.file) == 2) {
+            return if (to.file == 6) "O-O" else "O-O-O"
+        }
+
+        val captureStr = if (isCapture) "x" else ""
+        return when (piece.type) {
+            PieceType.PAWN -> {
+                if (isCapture) "${('a' + from.file)}x${to.toUci()}" else to.toUci()
+            }
+            PieceType.KNIGHT -> "N$captureStr${to.toUci()}"
+            PieceType.BISHOP -> "B$captureStr${to.toUci()}"
+            PieceType.ROOK -> "R$captureStr${to.toUci()}"
+            PieceType.QUEEN -> "Q$captureStr${to.toUci()}"
+            PieceType.KING -> "K$captureStr${to.toUci()}"
+        }
+    }
+
+    /**
+     * Menghasilkan teks riwayat langkah catur berurutan (misal: "1. e4 e5  2. Nf3 Nc6").
+     */
+    fun getFormattedMoveHistory(): String {
+        if (moveHistory.isEmpty()) return "(Belum ada langkah)"
+        val sb = StringBuilder()
+        for (i in moveHistory.indices) {
+            val record = moveHistory[i]
+            if (i % 2 == 0) {
+                sb.append("${i / 2 + 1}. ")
+            }
+            val isCapture = record.capturedPiece != null
+            val captureStr = if (isCapture) "x" else ""
+            val san = if (record.isCastling) {
+                if (record.to.file == 6) "O-O" else "O-O-O"
+            } else {
+                when (record.movedPiece.type) {
+                    PieceType.PAWN -> {
+                        if (isCapture) "${('a' + record.from.file)}x${record.to.toUci()}" else record.to.toUci()
+                    }
+                    PieceType.KNIGHT -> "N$captureStr${record.to.toUci()}"
+                    PieceType.BISHOP -> "B$captureStr${record.to.toUci()}"
+                    PieceType.ROOK -> "R$captureStr${record.to.toUci()}"
+                    PieceType.QUEEN -> "Q$captureStr${record.to.toUci()}"
+                    PieceType.KING -> "K$captureStr${record.to.toUci()}"
+                }
+            }
+            sb.append(san).append(" ")
+        }
+        return sb.toString().trim()
     }
 
     /**

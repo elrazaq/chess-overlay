@@ -506,29 +506,6 @@ class BoardState {
             }
         }
 
-        // Heuristic Recovery: Jika tidak ada pergerakan legal standar (misal aplikasi dibuka di tengah pertandingan),
-        // cari bidak yang cocok dengan jenisnya (atau bidak terdekat) dan pindahkan ke targetSquare.
-        val searchPieceType = pieceHint ?: PieceType.PAWN
-        var bestRecoverySq: Square? = null
-        var minDistance = 999
-        for (r in 0..7) {
-            for (f in 0..7) {
-                val sq = Square(f, r)
-                val p = getPiece(sq) ?: continue
-                if (p.isWhite == turn && (p.type == searchPieceType || pieceHint == null)) {
-                    val dist = Math.abs(f - targetSquare.file) + Math.abs(r - targetSquare.rank)
-                    if (dist < minDistance && sq != targetSquare) {
-                        minDistance = dist
-                        bestRecoverySq = sq
-                    }
-                }
-            }
-        }
-        if (bestRecoverySq != null) {
-            if (forcedTurn != null) isWhiteToMove = forcedTurn
-            return Pair(bestRecoverySq, targetSquare)
-        }
-
         // Jika tidak ditemukan pada giliran ini, coba auto-sync dengan giliran lawan (1 langkah desync)
         if (forcedTurn == null) {
             val oppositeMove = findMoveForSan(sanText, forcedTurn = !isWhiteToMove)

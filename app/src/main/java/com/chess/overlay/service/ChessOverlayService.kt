@@ -75,6 +75,7 @@ class ChessOverlayService : Service() {
     private var isAutoVisionMode = true // Default mode auto bullet
     private var autoVisionJob: Job? = null
     private var lastExecutedMove: Pair<Square, Square>? = null
+    private var lastProcessedMoveSignature: String = ""
 
     // Kalibrasi posisi & ukuran papan catur
     private var boardTopY = 480f
@@ -437,6 +438,7 @@ class ChessOverlayService : Service() {
             val undone = boardState.undoMove()
             if (undone) {
                 lastExecutedMove = null
+                lastProcessedMoveSignature = ""
                 sourceSquare = null
                 arrowOverlayView?.selectedSquare = null
                 setupBoardView?.selectedSquare = null
@@ -468,6 +470,7 @@ class ChessOverlayService : Service() {
         btnReset.setOnClickListener {
             countdownJob?.cancel()
             lastExecutedMove = null
+            lastProcessedMoveSignature = ""
             boardState.resetToStartingPosition()
             setupBoard.selectedSquare = null
             setupBoard.candidates = emptyList()
@@ -802,7 +805,7 @@ class ChessOverlayService : Service() {
 
                             withContext(Dispatchers.Main) {
                                 if (result.rawText.isNotBlank()) {
-                                    val sanInfo = if (result.detectedSan != null) " [${result.detectedSan}]" else ""
+                                    val sanInfo = if (result.latestSan != null) " [${result.latestSan}]" else ""
                                     tvDetectedOcr?.text = "${result.rawText}$sanInfo"
                                     tvDetectedOcr?.setTextColor(if (result.move != null) Color.parseColor("#34D399") else Color.parseColor("#F1F5F9"))
                                 } else {
@@ -811,8 +814,10 @@ class ChessOverlayService : Service() {
                                 }
                             }
 
+                            val signature = result.moveSignature
                             val textMove = result.move
-                            if (textMove != null && textMove != lastExecutedMove) {
+                            if (signature != null && signature != lastProcessedMoveSignature && textMove != null) {
+                                lastProcessedMoveSignature = signature
                                 lastExecutedMove = textMove
                                 withContext(Dispatchers.Main) {
                                     arrowOverlayView?.activeTrackingMove = textMove

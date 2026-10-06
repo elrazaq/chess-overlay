@@ -13,7 +13,9 @@ import kotlin.coroutines.resume
 
 data class TextDetectionResult(
     val rawText: String,
-    val detectedSan: String? = null,
+    val moveTokens: List<String> = emptyList(),
+    val latestSan: String? = null,
+    val moveSignature: String? = null,
     val move: Pair<Square, Square>? = null
 )
 
@@ -71,8 +73,7 @@ class MoveHistoryTextDetector {
         return try {
             val image = InputImage.fromBitmap(scaledBitmap, 0)
             val visionText = processImageAsync(image)
-            val (san, move) = parseVisionTextToMove(visionText, boardState)
-            TextDetectionResult(rawText = visionText.replace("\n", " ").trim(), detectedSan = san, move = move)
+            parseVisionTextToResult(visionText, boardState)
         } finally {
             if (scaledBitmap != cropped) scaledBitmap.recycle()
             cropped.recycle()
@@ -91,67 +92,139 @@ class MoveHistoryTextDetector {
         }
 
     /**
-     * Normalisasi karakter khusus dan salah baca OCR catur yang sering terjadi.
+     * Normalisasi karakter khusus dan salah baca OCR catur yang sering terjadi di Chess.com.
+     * Mengubah '2f6' -> 'Nf6', 'Wd4'/'wd4' -> 'Qd4', '8c4' -> 'Bc4', 'lxe4' -> 'xe4', dsb.
      */
-    private fun normalizeToken(token: String): String {
-        var s = token.trim().trim('<', '>', '[', ']', '(', ')', '{', '}', '|', '_', ':')
-        // Ganti simbol unicode bidak catur
+    fun normalizeToken(token: String): String {
+        var s = token.trim().trim('<', '>', '[', ']', '(', ')', '{', '}', '|', '_', ':', ';', '!', '"', '\'')
+
+        // 1. Ganti simbol unicode bidak catur jika ada
         s = s.replace("♞", "N").replace("♘", "N")
             .replace("♝", "B").replace("♗", "B")
             .replace("♜", "R").replace("♖", "R")
             .replace("♛", "Q").replace("♕", "Q")
             .replace("♚", "K").replace("♔", "K")
 
-        // Salah baca OCR umum:
-        // '2' atau 'z' di depan koordinat petak (misal '2e5' -> 'Ne5')
-        if (s.matches(Regex("^[2zZ][a-h][1-8]$"))) {
-            s = "N" + s.substring(1)
+        // 2. Rokade
+        if (s.equals("O-O", ignoreCase = true) || s == "0-0") return "O-O"
+        if (s.equals("O-O-O", ignoreCase = true) || s == "0-0-0") return "O-O-O"
+
+        // 3. Normalisasi Ratu (Queen) yang salah dibaca sebagai 'W', 'w', '0', 'O', atau 'q'
+        // Contoh: "Wd4" -> "Qd4", "wd4" -> "Qd4", "Wxf7" -> "Qxf7"
+        s = s.replace(Regex("^[WwO0Qq]([a-h][1-8])$"), "Q$1")
+        s = s.replace(Regex("^[WwO0Qq]x([a-h][1-8])$"), "Qx$1")
+
+        // 4. Normalisasi Kuda (Knight) yang salah dibaca sebagai '2', 'z', 'Z', atau 'n'
+        // Contoh: "2f6" -> "Nf6", "2e5" -> "Ne5", "2xf6" -> "Nxf6", "zf6" -> "Nf6"
+        s = s.replace(Regex("^[2zZNn]([a-h][1-8])$"), "N$1")
+        s = s.replace(Regex("^[2zZNn]x([a-h][1-8])$"), "Nx$1")
+
+        // 5. Normalisasi Gajah (Bishop) yang salah dibaca sebagai '8' atau 'b'
+        // Contoh: "8c4" -> "Bc4", "8e7" -> "Be7", "8xd4" -> "Bxd4"
+        s = s.replace(Regex("^[8Bb]([a-h][1-8])$"), "B$1")
+        s = s.replace(Regex("^[8Bb]x([a-h][1-8])$"), "Bx$1")
+
+        // 6. Normalisasi Benteng (Rook)
+        s = s.replace(Regex("^[Rr]([a-h][1-8])$"), "R$1")
+        s = s.replace(Regex("^[Rr]x([a-h][1-8])$"), "Rx$1")
+
+        // 7. Normalisasi Raja (King)
+        s = s.replace(Regex("^[Kk]([a-h][1-8])$"), "K$1")
+        s = s.replace(Regex("^[Kk]x([a-h][1-8])$"), "Kx$1")
+
+        // 8. Normalisasi Pion makan pion/bidak (misal 'lxe4' -> 'xe4', '1xe4' -> 'xe4')
+        s = s.replace(Regex("^[1lI!|]x([a-h][1-8])$"), "x$1")
+
+        // 9. Langkah pion biasa (misal 'e4', 'd5')
+        if (s.matches(Regex("^[a-h][1-8]$", RegexOption.IGNORE_CASE))) {
+            s = s.lowercase()
         }
-        // 'O' atau '0' di depan koordinat (misal 'Od4' -> 'Qd4')
-        if (s.matches(Regex("^[0O][a-h][1-8]$"))) {
-            s = "Q" + s.substring(1)
-        }
-        // '1', 'l', atau 'I' di depan 'x' (misal 'lxe4' -> 'xe4')
-        if (s.matches(Regex("^[1lI]x[a-h][1-8]$"))) {
-            s = s.substring(1)
-        }
+
         return s
     }
 
     /**
-     * Mengurai string yang dibaca OCR menjadi notasi SAN dan langkah sah catur.
-     * Contoh teks OCR: "4. Ne5 Qd4" atau "< dxe4 4. 2e5 [d4] >"
+     * Memeriksa apakah token adalah kandidat notasi catur valid (SAN).
      */
-    fun parseVisionTextToMove(text: String, boardState: BoardState): Pair<String?, Pair<Square, Square>?> {
-        if (text.isBlank()) return Pair(null, null)
+    private fun isPotentialChessMove(token: String): Boolean {
+        if (token.isEmpty()) return false
+        if (token == "O-O" || token == "O-O-O") return true
+        // Langkah pion (e4, c5, dxe4, exd5, xe4)
+        if (token.matches(Regex("^[a-h][1-8]$"))) return true
+        if (token.matches(Regex("^[a-h]?x[a-h][1-8]$"))) return true
+        // Langkah bidak perwira (Nf6, Qd4, Bc4, Rd1, Ke2, Qxf7, Nxd4, dsb)
+        if (token.matches(Regex("^[NBRQK][a-h]?[1-8]?x?[a-h][1-8]$"))) return true
+        return false
+    }
 
-        // Pisahkan token dan bersihkan
-        val rawTokens = text.split("\\s+".toRegex())
+    /**
+     * Mengurai teks OCR dari Move History Bar menjadi TextDetectionResult yang aman dan deterministik.
+     */
+    fun parseVisionTextToResult(text: String, boardState: BoardState): TextDetectionResult {
+        val cleanRawText = text.replace("\n", " ").trim()
+        if (cleanRawText.isBlank()) return TextDetectionResult(rawText = "")
+
+        // 1. Ekstrak kata-kata dan abaikan angka babak catur ("1.", "2.", "4.", dsb)
+        val rawWords = cleanRawText.split("\\s+".toRegex())
             .map { it.trim() }
-            .filter { it.isNotEmpty() && !it.endsWith(".") && !it.matches(Regex("^\\d+\\.$")) }
+            .filter { it.isNotEmpty() && !it.matches(Regex("^\\d+\\.*$")) }
 
-        val tokens = rawTokens.map { normalizeToken(it) }.filter { it.isNotEmpty() }
-
-        // 1. Cari token dari yang paling kanan (langkah terbaru selalu di sebelah kanan)
-        for (i in tokens.indices.reversed()) {
-            val token = tokens[i]
-            val move = boardState.findMoveForSan(token)
-            if (move != null) {
-                return Pair(token, move)
+        // 2. Normalisasi setiap kata
+        val moveTokens = mutableListOf<String>()
+        for (w in rawWords) {
+            val norm = normalizeToken(w)
+            if (isPotentialChessMove(norm)) {
+                moveTokens.add(norm)
+            } else {
+                // Cari substring yang mengandung langkah catur
+                val match = Regex("([NBRQK]?[a-h]?[1-8]?x?[a-h][1-8]|O-O-O|O-O)", RegexOption.IGNORE_CASE).find(norm)
+                if (match != null) {
+                    val sub = normalizeToken(match.value)
+                    if (isPotentialChessMove(sub)) {
+                        moveTokens.add(sub)
+                    }
+                }
             }
         }
 
-        // 2. Jika tidak ada token utuh yang cocok, cari regex petak [a-h][1-8] dari kanan
-        val targetMatches = Regex("([a-h][1-8])", RegexOption.IGNORE_CASE).findAll(text).toList()
-        for (match in targetMatches.reversed()) {
-            val uci = match.value.lowercase()
-            val move = boardState.findMoveForSan(uci)
-            if (move != null) {
-                return Pair(uci, move)
+        if (moveTokens.isEmpty()) {
+            return TextDetectionResult(rawText = cleanRawText)
+        }
+
+        // 3. Langkah TERBARU pada move history bar selalu token yang paling kanan!
+        val latestSan = moveTokens.last()
+        val signature = "${moveTokens.size}:$latestSan"
+
+        // 4. Cari langkah sah untuk token terbaru
+        var legalMove = boardState.findMoveForSan(latestSan)
+
+        // Jika tidak valid untuk giliran saat ini, coba cek dengan auto-turn sync
+        if (legalMove == null) {
+            legalMove = boardState.findMoveForSan(latestSan, forcedTurn = !boardState.isWhiteToMove)
+        }
+
+        // Jika masih null dan terdapat token sebelumnya (misal White e4 dan Black Nf6 terdeteksi berurutan)
+        if (legalMove == null && moveTokens.size >= 2) {
+            val secondLastSan = moveTokens[moveTokens.size - 2]
+            legalMove = boardState.findMoveForSan(secondLastSan)
+            if (legalMove != null) {
+                return TextDetectionResult(
+                    rawText = cleanRawText,
+                    moveTokens = moveTokens,
+                    latestSan = secondLastSan,
+                    moveSignature = "${moveTokens.size - 1}:$secondLastSan",
+                    move = legalMove
+                )
             }
         }
 
-        return Pair(null, null)
+        return TextDetectionResult(
+            rawText = cleanRawText,
+            moveTokens = moveTokens,
+            latestSan = latestSan,
+            moveSignature = signature,
+            move = legalMove
+        )
     }
 
     fun release() {

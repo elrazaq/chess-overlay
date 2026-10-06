@@ -383,23 +383,7 @@ class ArrowOverlayView @JvmOverloads constructor(
     }
 
     private fun drawTextSensorViewfinder(canvas: Canvas, rect: RectF) {
-        // 1. Fill tint transparan
-        canvas.drawRect(rect, textSensorBgPaint)
-        // 2. Dash glowing border
+        // Bingkai tipis tanpa teks apapun agar sama sekali tidak terbaca oleh kamera OCR
         canvas.drawRect(rect, textSensorBoxPaint)
-
-        // 3. Garis panduan tengah (centerline guide)
-        val midY = rect.centerY()
-        canvas.drawLine(rect.left, midY, rect.right, midY, motionLinePaint)
-
-        // 4. Badge Header "[ 🔍 SENSOR TEKS NOTASI ]"
-        val badgeW = 340f
-        val badgeH = 36f
-        val badgeLeft = (rect.centerX() - badgeW / 2f).coerceAtLeast(10f)
-        val badgeTop = (rect.top - badgeH - 6f).coerceAtLeast(10f)
-        val badgeRect = RectF(badgeLeft, badgeTop, badgeLeft + badgeW, badgeTop + badgeH)
-        canvas.drawRoundRect(badgeRect, 8f, 8f, textSensorBadgeBgPaint)
-        canvas.drawRoundRect(badgeRect, 8f, 8f, trackerCrosshairPaint)
-        canvas.drawText("🔍 SENSOR TEKS NOTASI", rect.centerX(), badgeTop + 25f, textSensorLabelPaint)
     }
 }

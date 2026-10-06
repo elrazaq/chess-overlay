@@ -44,11 +44,21 @@ class MoveHistoryTextDetector {
             return null
         }
 
+        // Perbesar (Scale up 2.5x) agar teks notasi catur mencapai ukuran optimal OCR (tinggi huruf ~40px)
+        val scaledW = (bmpW * 2.5f).toInt()
+        val scaledH = (barHeight * 2.5f).toInt()
+        val scaledBitmap = try {
+            Bitmap.createScaledBitmap(cropped, scaledW, scaledH, true)
+        } catch (e: Exception) {
+            cropped
+        }
+
         return try {
-            val image = InputImage.fromBitmap(cropped, 0)
+            val image = InputImage.fromBitmap(scaledBitmap, 0)
             val visionText = processImageAsync(image)
             parseVisionTextToMove(visionText, boardState)
         } finally {
+            if (scaledBitmap != cropped) scaledBitmap.recycle()
             cropped.recycle()
         }
     }

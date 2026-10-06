@@ -309,7 +309,7 @@ class BoardState {
      * 4. Rokade tidak boleh saat diskak atau melewati petak yang diskak.
      * 5. Raja sendiri TIDAK BOLEH dalam posisi skak setelah langkah dilakukan (mencegah langkah ilegal / pin).
      */
-    fun isValidMove(from: Square, to: Square): Boolean {
+    fun isValidMove(from: Square, to: Square, ignoreTurnCheck: Boolean = false): Boolean {
         if (from == to) return false
         val fromRow = 7 - from.rank
         val fromCol = from.file
@@ -319,8 +319,8 @@ class BoardState {
         val piece = grid[fromRow][fromCol] ?: return false
         val dest = grid[toRow][toCol]
 
-        // 1. Wajib giliran warna yang sedang aktif!
-        if (piece.isWhite != isWhiteToMove) return false
+        // 1. Wajib giliran warna yang sedang aktif jika tidak di-ignore!
+        if (!ignoreTurnCheck && piece.isWhite != isWhiteToMove) return false
 
         // 2. Tidak boleh memakan anak catur sendiri
         if (dest != null && dest.isWhite == piece.isWhite) return false
@@ -423,20 +423,28 @@ class BoardState {
 
     /**
      * Mencari langkah legal (from, to) berdasarkan notasi catur SAN (misal "Qd4", "Ne5", "e4", "dxe4", "O-O").
+     * Mendukung auto-resync jika giliran pemain sempat tidak sinkron.
      */
-    fun findMoveForSan(sanText: String): Pair<Square, Square>? {
+    fun findMoveForSan(sanText: String, forcedTurn: Boolean? = null): Pair<Square, Square>? {
+        val turn = forcedTurn ?: isWhiteToMove
         val clean = sanText.trim().replace("+", "").replace("#", "")
         if (clean.equals("O-O", ignoreCase = true) || clean == "0-0") {
-            val rank = if (isWhiteToMove) 0 else 7
+            val rank = if (turn) 0 else 7
             val from = Square(4, rank)
             val to = Square(6, rank)
-            return if (isValidMove(from, to)) Pair(from, to) else null
+            return if (isValidMove(from, to, ignoreTurnCheck = true)) {
+                if (forcedTurn != null) isWhiteToMove = forcedTurn
+                Pair(from, to)
+            } else null
         }
         if (clean.equals("O-O-O", ignoreCase = true) || clean == "0-0-0") {
-            val rank = if (isWhiteToMove) 0 else 7
+            val rank = if (turn) 0 else 7
             val from = Square(4, rank)
             val to = Square(2, rank)
-            return if (isValidMove(from, to)) Pair(from, to) else null
+            return if (isValidMove(from, to, ignoreTurnCheck = true)) {
+                if (forcedTurn != null) isWhiteToMove = forcedTurn
+                Pair(from, to)
+            } else null
         }
 
         // Cari target petak [a-h][1-8]
@@ -452,11 +460,11 @@ class BoardState {
         val prefix = clean.substring(0, targetMatch.range.first)
         for (ch in prefix) {
             when (ch.uppercaseChar()) {
-                'N' -> pieceHint = PieceType.KNIGHT
-                'B' -> pieceHint = PieceType.BISHOP
-                'R' -> pieceHint = PieceType.ROOK
-                'Q' -> pieceHint = PieceType.QUEEN
-                'K' -> pieceHint = PieceType.KING
+                'N', '♞', '♘' -> pieceHint = PieceType.KNIGHT
+                'B', '♝', '♗' -> pieceHint = PieceType.BISHOP
+                'R', '♜', '♖' -> pieceHint = PieceType.ROOK
+                'Q', '♛', '♕' -> pieceHint = PieceType.QUEEN
+                'K', '♚', '♔' -> pieceHint = PieceType.KING
                 in 'a'..'h' -> fileHint = ch.lowercaseChar()
                 in '1'..'8' -> rankHint = ch
             }
@@ -470,32 +478,43 @@ class BoardState {
             for (f in 0..7) {
                 val sq = Square(f, r)
                 val p = getPiece(sq) ?: continue
-                if (p.isWhite != isWhiteToMove) continue
+                if (p.isWhite != turn) continue
                 if (pieceHint != null && p.type != pieceHint) continue
                 if (fileHint != null && ('a' + f) != fileHint) continue
                 if (rankHint != null && ('1' + r) != rankHint) continue
 
-                if (isValidMove(sq, targetSquare)) {
+                if (isValidMove(sq, targetSquare, ignoreTurnCheck = true)) {
                     candidates.add(sq)
                 }
             }
         }
 
-        return if (candidates.isNotEmpty()) {
-            Pair(candidates[0], targetSquare)
-        } else {
-            // Jika pieceHint tidak cocok (misal OCR salah membaca huruf Q atau hilang), cari bidak apapun yang valid
-            for (r in 0..7) {
-                for (f in 0..7) {
-                    val sq = Square(f, r)
-                    val p = getPiece(sq) ?: continue
-                    if (p.isWhite == isWhiteToMove && isValidMove(sq, targetSquare)) {
-                        return Pair(sq, targetSquare)
-                    }
+        if (candidates.isNotEmpty()) {
+            if (forcedTurn != null) isWhiteToMove = forcedTurn
+            return Pair(candidates[0], targetSquare)
+        }
+
+        // Coba tanpa pieceHint jika OCR salah membaca karakter simbol
+        for (r in 0..7) {
+            for (f in 0..7) {
+                val sq = Square(f, r)
+                val p = getPiece(sq) ?: continue
+                if (p.isWhite == turn && isValidMove(sq, targetSquare, ignoreTurnCheck = true)) {
+                    if (forcedTurn != null) isWhiteToMove = forcedTurn
+                    return Pair(sq, targetSquare)
                 }
             }
-            null
         }
+
+        // Jika tidak ditemukan pada giliran ini, coba auto-sync dengan giliran lawan (1 langkah desync)
+        if (forcedTurn == null) {
+            val oppositeMove = findMoveForSan(sanText, forcedTurn = !isWhiteToMove)
+            if (oppositeMove != null) {
+                return oppositeMove
+            }
+        }
+
+        return null
     }
 
     /**

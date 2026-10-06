@@ -323,7 +323,12 @@ class ChessOverlayService : Service() {
         setupBoard.isWhiteBottom = isWhiteBottom
         setupBoard.isPlayMode = true
         setupBoard.onMoveMade = { from, to ->
-            executeMove(from, to)
+            val p = boardState.getPiece(from)
+            if (p != null && p.isWhite != boardState.isWhiteToMove) {
+                // Auto-sync giliran jika pemain sengaja menggerakkan bidak di mini map
+                boardState.isWhiteToMove = p.isWhite
+            }
+            executeMove(from, to, isAutoVision = true)
         }
 
         // Sub-panels
@@ -746,36 +751,14 @@ class ChessOverlayService : Service() {
                     if (bitmap != null) {
                         val bounds = currentBoardBounds
                         if (bounds != null) {
-                            var detectedMove: Pair<Square, Square>? = null
-
-                            // 1. PRIORITAS UTAMA: Baca notasi teks di Move History Bar di bawah papan via OCR
+                            // Mode Murni Baca Teks Notasi di Move History Bar di bawah papan
                             val textMove = textMoveDetector.detectLatestMove(bitmap, bounds, boardState)
                             if (textMove != null && textMove != lastExecutedMove) {
-                                detectedMove = textMove
-                            }
-
-                            // 2. FALLBACK: Jika teks belum terbaca, gunakan deteksi petak kuning
-                            if (detectedMove == null) {
-                                val yellowSquares = yellowDetector.detectYellowSquares(bitmap, bounds)
-                                if (yellowSquares.size == 2) {
-                                    val (from, to) = yellowDetector.detectMoveFromYellowSquares(
-                                        bitmap, bounds, yellowSquares[0], yellowSquares[1], boardState
-                                    )
-                                    val movePair = Pair(from, to)
-                                    if (movePair != lastExecutedMove) {
-                                        detectedMove = movePair
-                                    }
-                                }
-                            }
-
-                            // Eksekusi jika ditemukan langkah baru
-                            if (detectedMove != null && detectedMove != lastExecutedMove) {
-                                val (from, to) = detectedMove
-                                lastExecutedMove = detectedMove
+                                lastExecutedMove = textMove
                                 withContext(Dispatchers.Main) {
-                                    arrowOverlayView?.activeTrackingMove = detectedMove
+                                    arrowOverlayView?.activeTrackingMove = textMove
                                     arrowOverlayView?.invalidate()
-                                    executeMove(from, to, isAutoVision = true)
+                                    executeMove(textMove.first, textMove.second, isAutoVision = true)
                                 }
                             }
                         }

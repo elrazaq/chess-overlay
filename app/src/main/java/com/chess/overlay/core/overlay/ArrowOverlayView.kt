@@ -37,6 +37,7 @@ class ArrowOverlayView @JvmOverloads constructor(
     var isInputMoveMode: Boolean = false
     var selectedSquare: Square? = null
     var activeTrackingMove: Pair<Square, Square>? = null
+    var textSensorBounds: RectF? = null
 
     // Callback saat petak catur disentuh dalam mode manual input
     var onSquareTapped: ((Square) -> Unit)? = null
@@ -127,6 +128,30 @@ class ArrowOverlayView @JvmOverloads constructor(
         color = Color.argb(130, 250, 204, 21) // Amber #FACC15
     }
 
+    private val textSensorBoxPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 3.5f
+        color = Color.parseColor("#F59E0B") // Amber glow
+        pathEffect = DashPathEffect(floatArrayOf(12f, 8f), 0f)
+    }
+
+    private val textSensorBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.argb(45, 245, 158, 11) // Soft amber tint
+    }
+
+    private val textSensorBadgeBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.argb(230, 15, 23, 42) // Dark Slate Badge
+    }
+
+    private val textSensorLabelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#FBBF24") // Bright Gold
+        textSize = 24f
+        typeface = Typeface.DEFAULT_BOLD
+        textAlign = Paint.Align.CENTER
+    }
+
     private val arrowPath = Path()
     private var downSquare: Square? = null
 
@@ -188,6 +213,9 @@ class ArrowOverlayView @JvmOverloads constructor(
         // 1. Gambar 64 Titik Motion Tracker (After Effects style) saat mode Kalibrasi / Mapping aktif
         if (isCalibrationMode || isMappingMode) {
             draw64TrackerPoints(canvas, bounds)
+            textSensorBounds?.let { sensorRect ->
+                drawTextSensorViewfinder(canvas, sensorRect)
+            }
         }
 
         // 2. Highlight Petak Terpilih (Source square saat menggerakkan anak catur)
@@ -352,5 +380,26 @@ class ArrowOverlayView @JvmOverloads constructor(
         arrowPath.close()
 
         canvas.drawPath(arrowPath, headPaint)
+    }
+
+    private fun drawTextSensorViewfinder(canvas: Canvas, rect: RectF) {
+        // 1. Fill tint transparan
+        canvas.drawRect(rect, textSensorBgPaint)
+        // 2. Dash glowing border
+        canvas.drawRect(rect, textSensorBoxPaint)
+
+        // 3. Garis panduan tengah (centerline guide)
+        val midY = rect.centerY()
+        canvas.drawLine(rect.left, midY, rect.right, midY, motionLinePaint)
+
+        // 4. Badge Header "[ 🔍 SENSOR TEKS NOTASI ]"
+        val badgeW = 340f
+        val badgeH = 36f
+        val badgeLeft = (rect.centerX() - badgeW / 2f).coerceAtLeast(10f)
+        val badgeTop = (rect.top - badgeH - 6f).coerceAtLeast(10f)
+        val badgeRect = RectF(badgeLeft, badgeTop, badgeLeft + badgeW, badgeTop + badgeH)
+        canvas.drawRoundRect(badgeRect, 8f, 8f, textSensorBadgeBgPaint)
+        canvas.drawRoundRect(badgeRect, 8f, 8f, trackerCrosshairPaint)
+        canvas.drawText("🔍 SENSOR TEKS NOTASI", rect.centerX(), badgeTop + 25f, textSensorLabelPaint)
     }
 }

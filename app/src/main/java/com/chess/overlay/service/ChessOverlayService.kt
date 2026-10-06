@@ -76,10 +76,14 @@ class ChessOverlayService : Service() {
     private var autoVisionJob: Job? = null
     private var lastExecutedMove: Pair<Square, Square>? = null
 
-    // Kalibrasi posisi & ukuran papan
+    // Kalibrasi posisi & ukuran papan catur
     private var boardTopY = 480f
     private var boardWidth = 1080f
     private var currentBoardBounds: BoardBounds? = null
+
+    // Kalibrasi Sensor Teks Move History Bar
+    private var textSensorTopY = 1200f
+    private var textSensorHeight = 110f
 
     // Temporary selection untuk tap gerak manual di layar besar
     private var sourceSquare: Square? = null
@@ -119,6 +123,11 @@ class ChessOverlayService : Service() {
         boardTopY = prefs.getFloat("saved_board_top_y", defaultTopY)
         isWhiteBottom = prefs.getBoolean("saved_is_white_bottom", true)
 
+        val defaultTextTopY = boardTopY + boardWidth + (boardWidth / 8f) * 0.7f
+        val defaultTextHeight = (boardWidth / 8f) * 1.0f
+        textSensorTopY = prefs.getFloat("saved_text_sensor_top_y", defaultTextTopY)
+        textSensorHeight = prefs.getFloat("saved_text_sensor_height", defaultTextHeight)
+
         updateBoardBounds()
     }
 
@@ -128,6 +137,8 @@ class ChessOverlayService : Service() {
             .putFloat("saved_board_width", boardWidth)
             .putFloat("saved_board_top_y", boardTopY)
             .putBoolean("saved_is_white_bottom", isWhiteBottom)
+            .putFloat("saved_text_sensor_top_y", textSensorTopY)
+            .putFloat("saved_text_sensor_height", textSensorHeight)
             .apply()
     }
 
@@ -139,6 +150,18 @@ class ChessOverlayService : Service() {
             isWhiteBottom = isWhiteBottom
         )
         arrowOverlayView?.boardBounds = currentBoardBounds
+        updateTextSensorBounds()
+    }
+
+    private fun updateTextSensorBounds() {
+        val wm = windowManager ?: return
+        val metrics = DisplayMetrics()
+        @Suppress("DEPRECATION")
+        wm.defaultDisplay.getRealMetrics(metrics)
+        val screenW = metrics.widthPixels.toFloat()
+
+        val rect = android.graphics.RectF(0f, textSensorTopY, screenW, textSensorTopY + textSensorHeight)
+        arrowOverlayView?.textSensorBounds = rect
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -626,6 +649,37 @@ class ChessOverlayService : Service() {
             arrowOverlayView?.invalidate()
             calculateStockfishMoves()
         }
+
+        // Tombol Kalibrasi Sensor Teks Move History Bar
+        val btnTextUp = view.findViewById<Button>(R.id.btnTextUp)
+        val btnTextDown = view.findViewById<Button>(R.id.btnTextDown)
+        val btnTextHeightPlus = view.findViewById<Button>(R.id.btnTextHeightPlus)
+        val btnTextHeightMinus = view.findViewById<Button>(R.id.btnTextHeightMinus)
+
+        btnTextUp.setOnClickListener {
+            textSensorTopY -= 12f
+            updateTextSensorBounds()
+            saveCalibrationPrefs()
+            arrowOverlayView?.invalidate()
+        }
+        btnTextDown.setOnClickListener {
+            textSensorTopY += 12f
+            updateTextSensorBounds()
+            saveCalibrationPrefs()
+            arrowOverlayView?.invalidate()
+        }
+        btnTextHeightPlus.setOnClickListener {
+            textSensorHeight = (textSensorHeight + 10f).coerceAtMost(350f)
+            updateTextSensorBounds()
+            saveCalibrationPrefs()
+            arrowOverlayView?.invalidate()
+        }
+        btnTextHeightMinus.setOnClickListener {
+            textSensorHeight = (textSensorHeight - 10f).coerceAtLeast(30f)
+            updateTextSensorBounds()
+            saveCalibrationPrefs()
+            arrowOverlayView?.invalidate()
+        }
     }
 
     /**
@@ -730,29 +784,34 @@ class ChessOverlayService : Service() {
             return
         }
 
-        // Sembunyikan titik kalibrasi saat vision berjalan agar tidak mengotori tangkapan layar
-        if (isCalibrationVisible) {
-            isCalibrationVisible = false
-            panelView?.findViewById<View>(R.id.calibrationPanel)?.visibility = View.GONE
-            panelView?.findViewById<Button>(R.id.btnToggleCalibrate)?.setTextColor(Color.parseColor("#94A3B8"))
-            arrowOverlayView?.isCalibrationMode = false
-            arrowOverlayView?.invalidate()
-        }
-
         panelView?.findViewById<TextView>(R.id.tvEngineTitle)?.let {
             val sideText = if (boardState.isWhiteToMove) "Putih" else "Hitam"
             it.text = "⚡ Vision: Giliran $sideText"
         }
 
         autoVisionJob = serviceScope.launch(Dispatchers.Default) {
+            val tvDetectedOcr = panelView?.findViewById<TextView>(R.id.tvDetectedOcrText)
             while (isActive && isEngineRunning && isAutoVisionMode) {
                 try {
                     val bitmap = helper.captureSnapshot()
                     if (bitmap != null) {
                         val bounds = currentBoardBounds
+                        val sensorRect = arrowOverlayView?.textSensorBounds
                         if (bounds != null) {
-                            // Mode Murni Baca Teks Notasi di Move History Bar di bawah papan
-                            val textMove = textMoveDetector.detectLatestMove(bitmap, bounds, boardState)
+                            val result = textMoveDetector.detectLatestMove(bitmap, bounds, boardState, sensorRect)
+
+                            withContext(Dispatchers.Main) {
+                                if (result.rawText.isNotBlank()) {
+                                    val sanInfo = if (result.detectedSan != null) " [${result.detectedSan}]" else ""
+                                    tvDetectedOcr?.text = "${result.rawText}$sanInfo"
+                                    tvDetectedOcr?.setTextColor(if (result.move != null) Color.parseColor("#34D399") else Color.parseColor("#F1F5F9"))
+                                } else {
+                                    tvDetectedOcr?.text = "(Sensor belum membaca teks)"
+                                    tvDetectedOcr?.setTextColor(Color.parseColor("#94A3B8"))
+                                }
+                            }
+
+                            val textMove = result.move
                             if (textMove != null && textMove != lastExecutedMove) {
                                 lastExecutedMove = textMove
                                 withContext(Dispatchers.Main) {
@@ -767,7 +826,7 @@ class ChessOverlayService : Service() {
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }
-                delay(120) // Polling interval ~8 FPS (responsif & hemat daya)
+                delay(130) // Polling interval ~8 FPS (responsif & hemat daya)
             }
         }
     }

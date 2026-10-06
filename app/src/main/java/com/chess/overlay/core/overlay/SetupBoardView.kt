@@ -212,72 +212,110 @@ class SetupBoardView @JvmOverloads constructor(
         canvas.drawRect(0f, 0f, size, size, borderPaint)
     }
 
+    private var touchDownSquare: Square? = null
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (event.action != MotionEvent.ACTION_UP) return true
         val state = boardState ?: return true
         val size = Math.min(width, height).toFloat()
         if (size <= 0f) return true
         val sq = size / 8f
 
-        val col = (event.x / sq).toInt().coerceIn(0, 7)
-        val row = (event.y / sq).toInt().coerceIn(0, 7)
-        val file = if (isWhiteBottom) col else (7 - col)
-        val rank = if (isWhiteBottom) (7 - row) else row
-        val tappedSquare = Square(file, rank)
+        when (event.action) {
+            MotionEvent.ACTION_DOWN -> {
+                val col = (event.x / sq).toInt().coerceIn(0, 7)
+                val row = (event.y / sq).toInt().coerceIn(0, 7)
+                val file = if (isWhiteBottom) col else (7 - col)
+                val rank = if (isWhiteBottom) (7 - row) else row
+                touchDownSquare = Square(file, rank)
+                return true
+            }
+            MotionEvent.ACTION_UP -> {
+                val upCol = (event.x / sq).toInt().coerceIn(0, 7)
+                val upRow = (event.y / sq).toInt().coerceIn(0, 7)
+                val file = if (isWhiteBottom) upCol else (7 - upCol)
+                val rank = if (isWhiteBottom) (7 - upRow) else upRow
+                val tappedSquare = Square(file, rank)
+                val start = touchDownSquare
+                touchDownSquare = null
 
-        if (isPlayMode) {
-            // Mode Bermain Cepat (Sentuhan from -> to mengeksekusi langkah legal)
-            if (selectedSquare == null) {
-                val piece = state.getPiece(tappedSquare)
-                if (piece != null) {
-                    selectedSquare = tappedSquare
-                    invalidate()
-                }
-            } else {
-                val from = selectedSquare!!
-                if (from == tappedSquare) {
-                    selectedSquare = null
-                    invalidate()
-                } else {
-                    val moved = onMoveMade?.invoke(from, tappedSquare) ?: false
-                    selectedSquare = null
-                    invalidate()
-                }
-            }
-            return true
-        }
-
-        // Mode Setup Manual Posisi (Bebas Pasang/Hapus/Pindah)
-        when (currentTool) {
-            SetupTool.DELETE -> {
-                state.setPiece(tappedSquare, null)
-                selectedSquare = null
-                invalidate()
-                onBoardChanged?.invoke()
-            }
-            SetupTool.PLACE -> {
-                state.setPiece(tappedSquare, Piece(activePieceType, activePieceIsWhite))
-                selectedSquare = null
-                invalidate()
-                onBoardChanged?.invoke()
-            }
-            SetupTool.MOVE -> {
-                if (selectedSquare == null) {
-                    if (state.getPiece(tappedSquare) != null) {
-                        selectedSquare = tappedSquare
-                        invalidate()
+                if (isPlayMode) {
+                    // 1. Dukung Drag & Drop langsung (Sentuh bidak -> geser -> lepas di petak tujuan)
+                    if (start != null && start != tappedSquare) {
+                        val startPiece = state.getPiece(start)
+                        if (startPiece != null) {
+                            onMoveMade?.invoke(start, tappedSquare)
+                            selectedSquare = null
+                            invalidate()
+                            return true
+                        }
                     }
-                } else {
-                    val from = selectedSquare!!
-                    if (from == tappedSquare) {
-                        selectedSquare = null
+
+                    // 2. Dukung Tap 2 Kali (Tap petak asal -> Tap petak tujuan)
+                    if (selectedSquare == null) {
+                        val piece = state.getPiece(tappedSquare)
+                        if (piece != null) {
+                            selectedSquare = tappedSquare
+                            invalidate()
+                        }
                     } else {
-                        state.movePieceFree(from, tappedSquare)
+                        val from = selectedSquare!!
+                        if (from == tappedSquare) {
+                            selectedSquare = null
+                            invalidate()
+                        } else {
+                            onMoveMade?.invoke(from, tappedSquare)
+                            selectedSquare = null
+                            invalidate()
+                        }
+                    }
+                    return true
+                }
+
+                // Mode Setup Manual Posisi (Bebas Pasang/Hapus/Pindah)
+                when (currentTool) {
+                    SetupTool.DELETE -> {
+                        state.setPiece(tappedSquare, null)
                         selectedSquare = null
+                        invalidate()
                         onBoardChanged?.invoke()
                     }
-                    invalidate()
+                    SetupTool.PLACE -> {
+                        state.setPiece(tappedSquare, Piece(activePieceType, activePieceIsWhite))
+                        selectedSquare = null
+                        invalidate()
+                        onBoardChanged?.invoke()
+                    }
+                    SetupTool.MOVE -> {
+                        if (start != null && start != tappedSquare && state.getPiece(start) != null) {
+                            state.movePieceFree(start, tappedSquare)
+                            selectedSquare = null
+                            onBoardChanged?.invoke()
+                            invalidate()
+                            return true
+                        }
+                        if (selectedSquare == null) {
+                            if (state.getPiece(tappedSquare) != null) {
+                                selectedSquare = tappedSquare
+                                invalidate()
+                            }
+                        } else {
+                            val from = selectedSquare!!
+                            if (from == tappedSquare) {
+                                selectedSquare = null
+                            } else {
+                                state.movePieceFree(from, tappedSquare)
+                                selectedSquare = null
+                                onBoardChanged?.invoke()
+                            }
+                            invalidate()
+                        }
+                    }
                 }
+                return true
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                touchDownSquare = null
+                return true
             }
         }
         return true

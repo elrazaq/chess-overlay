@@ -37,7 +37,6 @@ class ArrowOverlayView @JvmOverloads constructor(
     var isInputMoveMode: Boolean = false
     var selectedSquare: Square? = null
     var activeTrackingMove: Pair<Square, Square>? = null
-    var textSensorBounds: RectF? = null
 
     // Callback saat petak catur disentuh dalam mode manual input
     var onSquareTapped: ((Square) -> Unit)? = null
@@ -128,30 +127,6 @@ class ArrowOverlayView @JvmOverloads constructor(
         color = Color.argb(130, 250, 204, 21) // Amber #FACC15
     }
 
-    private val textSensorBoxPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeWidth = 3.5f
-        color = Color.parseColor("#F59E0B") // Amber glow
-        pathEffect = DashPathEffect(floatArrayOf(12f, 8f), 0f)
-    }
-
-    private val textSensorBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.FILL
-        color = Color.argb(45, 245, 158, 11) // Soft amber tint
-    }
-
-    private val textSensorBadgeBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.FILL
-        color = Color.argb(230, 15, 23, 42) // Dark Slate Badge
-    }
-
-    private val textSensorLabelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#FBBF24") // Bright Gold
-        textSize = 24f
-        typeface = Typeface.DEFAULT_BOLD
-        textAlign = Paint.Align.CENTER
-    }
-
     private val arrowPath = Path()
     private var downSquare: Square? = null
 
@@ -213,9 +188,6 @@ class ArrowOverlayView @JvmOverloads constructor(
         // 1. Gambar 64 Titik Motion Tracker (After Effects style) saat mode Kalibrasi / Mapping aktif
         if (isCalibrationMode || isMappingMode) {
             draw64TrackerPoints(canvas, bounds)
-            textSensorBounds?.let { sensorRect ->
-                drawTextSensorViewfinder(canvas, sensorRect)
-            }
         }
 
         // 2. Highlight Petak Terpilih (Source square saat menggerakkan anak catur)
@@ -380,10 +352,5 @@ class ArrowOverlayView @JvmOverloads constructor(
         arrowPath.close()
 
         canvas.drawPath(arrowPath, headPaint)
-    }
-
-    private fun drawTextSensorViewfinder(canvas: Canvas, rect: RectF) {
-        // Bingkai tipis tanpa teks apapun agar sama sekali tidak terbaca oleh kamera OCR
-        canvas.drawRect(rect, textSensorBoxPaint)
     }
 }

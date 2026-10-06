@@ -59,51 +59,18 @@
         android:orientation="vertical"
         android:layout_marginTop="4dp">
 
-        <!-- Mode Switch: Auto Vision vs Manual -->
+        <!-- Mode Switch: Mode HOLD (Tombol Tahan) vs Mode Mini Board -->
         <Button
             android:id="@+id/btnToggleMode"
             android:layout_width="match_parent"
             android:layout_height="30dp"
-            android:text="⚡ Mode: Auto Vision (Bullet)"
+            android:text="🎯 MODE: HOLD (TOMBOL TAHAN)"
             android:textColor="#FFFFFF"
-            android:backgroundTint="#2563EB"
+            android:backgroundTint="#059669"
             android:textSize="9.5sp"
             android:textStyle="bold"
             android:padding="0dp"
             android:layout_marginBottom="3dp" />
-
-        <!-- Live OCR Text Detector Monitor -->
-        <LinearLayout
-            android:id="@+id/ocrMonitorContainer"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:background="#0F172A"
-            android:paddingHorizontal="6dp"
-            android:paddingVertical="4dp"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:layout_marginBottom="3dp">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="📝 Teks:"
-                android:textColor="#38BDF8"
-                android:textSize="10sp"
-                android:textStyle="bold"
-                android:layout_marginEnd="4dp" />
-
-            <TextView
-                android:id="@+id/tvDetectedOcrText"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Mencari baris langkah..."
-                android:textColor="#F1F5F9"
-                android:textSize="10sp"
-                android:maxLines="1"
-                android:ellipsize="end" />
-        </LinearLayout>
 
         <!-- Top Candidates List (#1 to #5 + #H) -->
         <LinearLayout
@@ -163,53 +130,6 @@
                 android:textSize="10sp"
                 android:textStyle="bold"
                 android:visibility="gone" />
-        </LinearLayout>
-
-        <!-- Pengaturan Jeda Waktu Gerak Bebas (Default: 3 Detik) -->
-        <LinearLayout
-            android:id="@+id/delayContainer"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:gravity="center_vertical"
-            android:paddingHorizontal="4dp"
-            android:paddingVertical="3dp"
-            android:orientation="horizontal">
-
-            <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="⏳ Jeda Gerak Bebas:"
-                android:textColor="#94A3B8"
-                android:textSize="9.5sp" />
-
-            <Button
-                android:id="@+id/btnDelayMinus"
-                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                android:layout_width="26dp"
-                android:layout_height="24dp"
-                android:text="➖"
-                android:textSize="7sp"
-                android:padding="0dp" />
-
-            <TextView
-                android:id="@+id/tvDelayDuration"
-                android:layout_width="32dp"
-                android:layout_height="wrap_content"
-                android:gravity="center"
-                android:text="3 dtk"
-                android:textColor="#38BDF8"
-                android:textSize="10sp"
-                android:textStyle="bold" />
-
-            <Button
-                android:id="@+id/btnDelayPlus"
-                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                android:layout_width="26dp"
-                android:layout_height="24dp"
-                android:text="➕"
-                android:textSize="7sp"
-                android:padding="0dp" />
         </LinearLayout>
 
         <!-- Live Move History Display -->
@@ -598,58 +518,6 @@
                     android:layout_height="26dp"
                     android:text="➖"
                     android:textSize="8sp"
-                    android:padding="0dp" />
-            </LinearLayout>
-
-            <!-- Baris 2: Sensor Teks Notasi -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical">
-
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="🔍 Teks:"
-                    android:textColor="#F59E0B"
-                    android:textSize="9.5sp"
-                    android:textStyle="bold" />
-
-                <Button
-                    android:id="@+id/btnTextUp"
-                    android:layout_width="28dp"
-                    android:layout_height="26dp"
-                    android:text="⬆️"
-                    android:textSize="8sp"
-                    android:padding="0dp"
-                    android:layout_marginEnd="2dp" />
-
-                <Button
-                    android:id="@+id/btnTextDown"
-                    android:layout_width="28dp"
-                    android:layout_height="26dp"
-                    android:text="⬇️"
-                    android:textSize="8sp"
-                    android:padding="0dp"
-                    android:layout_marginEnd="3dp" />
-
-                <Button
-                    android:id="@+id/btnTextHeightPlus"
-                    android:layout_width="28dp"
-                    android:layout_height="26dp"
-                    android:text="↕️➕"
-                    android:textSize="7sp"
-                    android:padding="0dp"
-                    android:layout_marginEnd="2dp" />
-
-                <Button
-                    android:id="@+id/btnTextHeightMinus"
-                    android:layout_width="28dp"
-                    android:layout_height="26dp"
-                    android:text="↕️➖"
-                    android:textSize="7sp"
                     android:padding="0dp" />
             </LinearLayout>
         </LinearLayout>

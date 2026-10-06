@@ -1,7 +1,6 @@
 package com.chess.overlay.service
 
 import android.annotation.SuppressLint
-import android.app.Activity
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
@@ -9,7 +8,6 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.PixelFormat
-import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.IBinder
 import android.os.VibrationEffect
@@ -21,6 +19,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.Button
+import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -36,10 +35,9 @@ import com.chess.overlay.core.model.Square
 import com.chess.overlay.core.overlay.ArrowOverlayView
 import com.chess.overlay.core.overlay.SetupBoardView
 import com.chess.overlay.core.overlay.SetupTool
-import com.chess.overlay.core.vision.MoveHistoryTextDetector
-import com.chess.overlay.core.vision.PieceClassifier
-import com.chess.overlay.core.vision.YellowHighlightDetector
 import kotlinx.coroutines.*
+import kotlin.math.abs
+import kotlin.math.hypot
 
 class ChessOverlayService : Service() {
 
@@ -49,7 +47,10 @@ class ChessOverlayService : Service() {
     // Overlay Views
     private var arrowOverlayView: ArrowOverlayView? = null
     private var panelView: View? = null
+    private var holdButtonView: View? = null
+
     private var arrowLayoutParams: WindowManager.LayoutParams? = null
+    private var holdLayoutParams: WindowManager.LayoutParams? = null
     private var setupBoardView: SetupBoardView? = null
 
     // Engine & Virtual Board State
@@ -57,44 +58,29 @@ class ChessOverlayService : Service() {
     private lateinit var stockfishEngine: StockfishBridge
     private var currentCandidates: List<MoveCandidate> = emptyList()
 
-    // Mode & Timer Jeda
+    // Mode: HOLD (Tombol Tahan Layar) vs MINI BOARD (Manual Panel)
+    private var isHoldMode = true
     private var isEngineRunning = false
     private var isPanelMinimized = false
     private var isCalibrationVisible = false
-    private var isWhiteBottom = true // Default Putih di bawah (standar catur)
+    private var isWhiteBottom = true
     private var isPerspectiveManuallySet = false
-    private var isBoardBoundsCalibrated = false
-    private var delayDurationSeconds = 3 // Default 3 detik jeda gerak bebas
-    private var countdownJob: Job? = null
-    private var isMappingModeActive = false
 
-    // Auto Vision Screen Capture & Yellow Highlight Tracking
-    private var screenCaptureHelper: ScreenCaptureHelper? = null
-    private val textMoveDetector = MoveHistoryTextDetector()
-    private val yellowDetector = YellowHighlightDetector()
-    private val pieceClassifier = PieceClassifier()
-    private var isAutoVisionMode = true // Default mode auto bullet
-    private var autoVisionJob: Job? = null
-    private var lastExecutedMove: Pair<Square, Square>? = null
-    private var lastProcessedMoveSignature: String = ""
-
-    // Kalibrasi posisi & ukuran papan catur
+    // Kalibrasi posisi & ukuran papan catur di layar
     private var boardTopY = 480f
     private var boardWidth = 1080f
     private var currentBoardBounds: BoardBounds? = null
 
-    // Kalibrasi Sensor Teks Move History Bar
-    private var textSensorTopY = 1200f
-    private var textSensorHeight = 110f
+    // Posisi tombol bulat mengambang (HOLD Button)
+    private var holdButtonX = 30
+    private var holdButtonY = 850
 
-    // Temporary selection untuk tap gerak manual di layar besar
+    // Temporary selection untuk tap From -> To di layar
     private var sourceSquare: Square? = null
 
     companion object {
         const val CHANNEL_ID = "ChessOverlayChannel"
         const val NOTIFICATION_ID = 1001
-        const val EXTRA_RESULT_CODE = "extra_result_code"
-        const val EXTRA_RESULT_DATA = "extra_result_data"
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -124,11 +110,8 @@ class ChessOverlayService : Service() {
         boardWidth = prefs.getFloat("saved_board_width", defaultWidth)
         boardTopY = prefs.getFloat("saved_board_top_y", defaultTopY)
         isWhiteBottom = prefs.getBoolean("saved_is_white_bottom", true)
-
-        val defaultTextTopY = boardTopY + boardWidth + (boardWidth / 8f) * 0.7f
-        val defaultTextHeight = (boardWidth / 8f) * 1.0f
-        textSensorTopY = prefs.getFloat("saved_text_sensor_top_y", defaultTextTopY)
-        textSensorHeight = prefs.getFloat("saved_text_sensor_height", defaultTextHeight)
+        holdButtonX = prefs.getInt("saved_hold_btn_x", 30)
+        holdButtonY = prefs.getInt("saved_hold_btn_y", (metrics.heightPixels * 0.55f).toInt())
 
         updateBoardBounds()
     }
@@ -139,8 +122,8 @@ class ChessOverlayService : Service() {
             .putFloat("saved_board_width", boardWidth)
             .putFloat("saved_board_top_y", boardTopY)
             .putBoolean("saved_is_white_bottom", isWhiteBottom)
-            .putFloat("saved_text_sensor_top_y", textSensorTopY)
-            .putFloat("saved_text_sensor_height", textSensorHeight)
+            .putInt("saved_hold_btn_x", holdButtonX)
+            .putInt("saved_hold_btn_y", holdButtonY)
             .apply()
     }
 
@@ -152,44 +135,12 @@ class ChessOverlayService : Service() {
             isWhiteBottom = isWhiteBottom
         )
         arrowOverlayView?.boardBounds = currentBoardBounds
-        updateTextSensorBounds()
-    }
-
-    private fun updateTextSensorBounds() {
-        val wm = windowManager ?: return
-        val metrics = DisplayMetrics()
-        @Suppress("DEPRECATION")
-        wm.defaultDisplay.getRealMetrics(metrics)
-        val screenW = metrics.widthPixels.toFloat()
-
-        val rect = android.graphics.RectF(0f, textSensorTopY, screenW, textSensorTopY + textSensorHeight)
-        arrowOverlayView?.textSensorBounds = rect
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         try {
-            // 1. Wajib jalankan Foreground Notification TERLEBIH DAHULU (syarat mutlak Android 14 sebelum getMediaProjection)
             startForegroundNotification()
             setupOverlayViews()
-
-            // 2. Inisialisasi MediaProjection setelah foreground service aktif
-            val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, Activity.RESULT_CANCELED) ?: Activity.RESULT_CANCELED
-            val data: Intent? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                intent?.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
-            } else {
-                @Suppress("DEPRECATION")
-                intent?.getParcelableExtra(EXTRA_RESULT_DATA)
-            }
-
-            if (resultCode == Activity.RESULT_OK && data != null) {
-                try {
-                    val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-                    val projection = projectionManager.getMediaProjection(resultCode, data)
-                    screenCaptureHelper = ScreenCaptureHelper(this, projection)
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-            }
         } catch (e: Exception) {
             e.printStackTrace()
             Toast.makeText(this, "Error memulai overlay: ${e.message}", Toast.LENGTH_LONG).show()
@@ -215,7 +166,7 @@ class ChessOverlayService : Service() {
             }
 
             // 1. Fullscreen Transparent Arrow Overlay
-            // Default: FLAG_NOT_TOUCHABLE (sentuhan tembus 100% ke game catur)
+            // Default: FLAG_NOT_TOUCHABLE (sentuhan 100% tembus ke aplikasi catur di bawahnya)
             arrowLayoutParams = WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.MATCH_PARENT,
@@ -260,10 +211,113 @@ class ChessOverlayService : Service() {
             setupPanelTouchAndControls(panelParams)
             wm.addView(panelView, panelParams)
 
+            // 3. Floating Draggable Circular HOLD Button
+            val holdInflater = LayoutInflater.from(themedContext)
+            holdButtonView = holdInflater.inflate(R.layout.floating_hold_button, null)
+
+            val initialHoldParams = WindowManager.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                overlayType,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = Gravity.TOP or Gravity.START
+                x = holdButtonX
+                y = holdButtonY
+            }
+            holdLayoutParams = initialHoldParams
+
+            setupHoldButtonTouchAndDrag(initialHoldParams)
+            wm.addView(holdButtonView, initialHoldParams)
+
         } catch (e: Exception) {
             e.printStackTrace()
             Toast.makeText(this, "Gagal memasang overlay: ${e.message}", Toast.LENGTH_LONG).show()
         }
+    }
+
+    /**
+     * Konfigurasi Tombol Bulat HOLD:
+     * - TAHAN JARI (ACTION_DOWN): Layar seketika masuk Mode Mapping (menangkap tap 2 kali di papan).
+     * - LEPAS JARI (ACTION_UP): Layar seketika 100% TEMBUS SENTUH ke aplikasi Chess.com.
+     * - DRAG: Dapat digeser kemana saja di layar agar pas di jangkauan jempol.
+     */
+    @SuppressLint("ClickableViewAccessibility", "SetTextI18n")
+    private fun setupHoldButtonTouchAndDrag(params: WindowManager.LayoutParams) {
+        val button = holdButtonView ?: return
+        val container = button.findViewById<FrameLayout>(R.id.holdButtonContainer)
+        val tvIcon = button.findViewById<TextView>(R.id.tvHoldIcon)
+        val tvLabel = button.findViewById<TextView>(R.id.tvHoldLabel)
+
+        button.setOnTouchListener(object : View.OnTouchListener {
+            private var initialX = 0
+            private var initialY = 0
+            private var initialTouchX = 0f
+            private var initialTouchY = 0f
+            private var isDragging = false
+
+            override fun onTouch(v: View, event: MotionEvent): Boolean {
+                when (event.action) {
+                    MotionEvent.ACTION_DOWN -> {
+                        initialX = params.x
+                        initialY = params.y
+                        initialTouchX = event.rawX
+                        initialTouchY = event.rawY
+                        isDragging = false
+
+                        // AKTIFKAN MAPPING (TEKAN & TAHAN)
+                        vibrateDevice(25)
+                        container.setBackgroundResource(R.drawable.bg_hold_button_active)
+                        tvIcon.text = "🖐️"
+                        tvLabel.text = "MAPPING"
+                        tvLabel.setTextColor(Color.WHITE)
+
+                        setArrowOverlayTouchable(true)
+                        arrowOverlayView?.isInputMoveMode = true
+                        panelView?.findViewById<TextView>(R.id.tvEngineTitle)?.text = "🖐️ TAHAN AKTIF: Tap Petak Papan!"
+                        return true
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        val dx = event.rawX - initialTouchX
+                        val dy = event.rawY - initialTouchY
+                        if (!isDragging && hypot(dx.toDouble(), dy.toDouble()) > 15) {
+                            isDragging = true
+                        }
+                        if (isDragging) {
+                            params.x = (initialX + dx).toInt()
+                            params.y = (initialY + dy).toInt()
+                            windowManager?.updateViewLayout(button, params)
+                        }
+                        return true
+                    }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                        // LEPAS TOMBOL -> 100% TEMBUS SENTUH KEMBALI
+                        container.setBackgroundResource(R.drawable.bg_hold_button_idle)
+                        tvIcon.text = "🎯"
+                        tvLabel.text = "TAHAN"
+                        tvLabel.setTextColor(Color.parseColor("#38BDF8"))
+
+                        setArrowOverlayTouchable(false)
+                        arrowOverlayView?.isInputMoveMode = false
+                        sourceSquare = null
+                        arrowOverlayView?.selectedSquare = null
+                        arrowOverlayView?.invalidate()
+
+                        val sideText = if (boardState.isWhiteToMove) "Putih" else "Hitam"
+                        panelView?.findViewById<TextView>(R.id.tvEngineTitle)?.text = "🎯 Giliran $sideText (Hold: Tembus)"
+
+                        if (isDragging) {
+                            holdButtonX = params.x
+                            holdButtonY = params.y
+                            saveCalibrationPrefs()
+                        }
+                        return true
+                    }
+                }
+                return false
+            }
+        })
     }
 
     @SuppressLint("ClickableViewAccessibility", "SetTextI18n")
@@ -275,61 +329,28 @@ class ChessOverlayService : Service() {
         val btnToggleEngine = view.findViewById<Button>(R.id.btnToggleEngine)
         val btnMinimize = view.findViewById<TextView>(R.id.btnToggleMinimize)
         val btnToggleMode = view.findViewById<Button>(R.id.btnToggleMode)
-        val delayContainer = view.findViewById<LinearLayout>(R.id.delayContainer)
-
-        // Pengatur Jeda Detik
-        val btnDelayMinus = view.findViewById<Button>(R.id.btnDelayMinus)
-        val btnDelayPlus = view.findViewById<Button>(R.id.btnDelayPlus)
-        val tvDelayDuration = view.findViewById<TextView>(R.id.tvDelayDuration)
-        tvDelayDuration.text = "${delayDurationSeconds} dtk"
 
         fun updateModeUI() {
-            if (isAutoVisionMode) {
-                btnToggleMode.text = "⚡ Mode: Auto Vision (Bullet)"
-                btnToggleMode.setBackgroundColor(Color.parseColor("#2563EB"))
-                delayContainer.visibility = View.GONE
+            if (isHoldMode) {
+                btnToggleMode.text = "🎯 MODE: HOLD (TOMBOL TAHAN)"
+                btnToggleMode.setBackgroundColor(Color.parseColor("#059669"))
+                holdButtonView?.visibility = if (isEngineRunning) View.VISIBLE else View.GONE
             } else {
-                btnToggleMode.text = "🎮 Mode: Manual (Jeda Timer)"
-                btnToggleMode.setBackgroundColor(Color.parseColor("#475569"))
-                delayContainer.visibility = View.VISIBLE
+                btnToggleMode.text = "♟️ MODE: MINI BOARD (MANUAL)"
+                btnToggleMode.setBackgroundColor(Color.parseColor("#2563EB"))
+                holdButtonView?.visibility = View.GONE
             }
         }
         updateModeUI()
 
         btnToggleMode.setOnClickListener {
-            isAutoVisionMode = !isAutoVisionMode
+            isHoldMode = !isHoldMode
             updateModeUI()
-            if (isEngineRunning) {
-                if (isAutoVisionMode) {
-                    countdownJob?.cancel()
-                    setOverlayTouchable(false)
-                    btnToggleEngine.text = "⏸️ STOP AUTO"
-                    btnToggleEngine.setBackgroundColor(getColor(R.color.threat_arrow))
-                    startAutoVisionLoop()
-                } else {
-                    autoVisionJob?.cancel()
-                    btnToggleEngine.text = "⏸️ PAUSE"
-                    btnToggleEngine.setBackgroundColor(getColor(R.color.threat_arrow))
-                    calculateStockfishMoves()
-                    startFreeMoveDelay(delayDurationSeconds, isResumeBuffer = true)
-                }
-            }
-            Toast.makeText(this, if (isAutoVisionMode) "Mode: Auto Vision (Bullet Cepat)" else "Mode: Manual (Jeda Timer)", Toast.LENGTH_SHORT).show()
-        }
-
-        btnDelayMinus.setOnClickListener {
-            if (delayDurationSeconds > 1) {
-                delayDurationSeconds--
-                tvDelayDuration.text = "${delayDurationSeconds} dtk"
-                Toast.makeText(this, "Jeda gerak bebas: ${delayDurationSeconds} detik", Toast.LENGTH_SHORT).show()
-            }
-        }
-
-        btnDelayPlus.setOnClickListener {
-            if (delayDurationSeconds < 15) {
-                delayDurationSeconds++
-                tvDelayDuration.text = "${delayDurationSeconds} dtk"
-                Toast.makeText(this, "Jeda gerak bebas: ${delayDurationSeconds} detik", Toast.LENGTH_SHORT).show()
+            setArrowOverlayTouchable(false)
+            if (isHoldMode) {
+                Toast.makeText(this, "Mode HOLD Aktif: Tekan & Tahan tombol 🎯 untuk mapping catur!", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "Mode Mini Board: Gerakkan bidak langsung di papan mini!", Toast.LENGTH_SHORT).show()
             }
         }
 
@@ -351,10 +372,9 @@ class ChessOverlayService : Service() {
         setupBoard.onMoveMade = { from, to ->
             val p = boardState.getPiece(from)
             if (p != null && p.isWhite != boardState.isWhiteToMove) {
-                // Auto-sync giliran jika pemain sengaja menggerakkan bidak di mini map
                 boardState.isWhiteToMove = p.isWhite
             }
-            executeMove(from, to, isAutoVision = true)
+            executeMove(from, to)
         }
 
         // Sub-panels
@@ -407,20 +427,22 @@ class ChessOverlayService : Service() {
         btnToggleEngine.setOnClickListener {
             isEngineRunning = !isEngineRunning
             if (isEngineRunning) {
-                btnToggleEngine.text = if (isAutoVisionMode) "⏸️ STOP AUTO" else "⏸️ PAUSE"
+                btnToggleEngine.text = "⏸️ PAUSE"
                 btnToggleEngine.setBackgroundColor(getColor(R.color.threat_arrow))
                 calculateStockfishMoves()
-                if (isAutoVisionMode) {
-                    startAutoVisionLoop()
-                    Toast.makeText(this, "⚡ Auto Vision Aktif! Gerakkan bidak langsung di catur.", Toast.LENGTH_SHORT).show()
-                } else {
-                    startFreeMoveDelay(delayDurationSeconds, isResumeBuffer = true)
-                    Toast.makeText(this, "Game Dimulai! Jeda ${delayDurationSeconds}s sebelum mode sentuh overlay.", Toast.LENGTH_SHORT).show()
+                if (isHoldMode) {
+                    holdButtonView?.visibility = View.VISIBLE
                 }
+                setArrowOverlayTouchable(false)
+                val sideText = if (boardState.isWhiteToMove) "Putih" else "Hitam"
+                tvEngineTitle.text = "🎯 Giliran $sideText (Hold: Tembus)"
+                Toast.makeText(this, "Game Dimulai! Tahan tombol 🎯 untuk mapping.", Toast.LENGTH_SHORT).show()
             } else {
                 btnToggleEngine.text = "▶️ START"
                 btnToggleEngine.setBackgroundColor(getColor(R.color.accent))
-                pauseGameAndFreeScreen()
+                setArrowOverlayTouchable(false)
+                holdButtonView?.visibility = View.GONE
+                tvEngineTitle.text = "Engine Dijeda (Sentuhan Bebas)"
                 Toast.makeText(this, "Engine Dijeda (Sentuhan Bebas)", Toast.LENGTH_SHORT).show()
             }
         }
@@ -439,8 +461,6 @@ class ChessOverlayService : Service() {
         btnUndo.setOnClickListener {
             val undone = boardState.undoMove()
             if (undone) {
-                lastExecutedMove = null
-                lastProcessedMoveSignature = ""
                 sourceSquare = null
                 arrowOverlayView?.selectedSquare = null
                 setupBoardView?.selectedSquare = null
@@ -448,9 +468,6 @@ class ChessOverlayService : Service() {
                 setupBoardView?.invalidate()
                 arrowOverlayView?.invalidate()
                 updateMoveHistoryDisplay()
-                if (!isAutoVisionMode) {
-                    enterMappingMode()
-                }
                 calculateStockfishMoves()
                 Toast.makeText(this, "Langkah di-undo ↩️", Toast.LENGTH_SHORT).show()
             }
@@ -460,8 +477,6 @@ class ChessOverlayService : Service() {
         btnRedo?.setOnClickListener {
             val redone = boardState.redoMove()
             if (redone) {
-                lastExecutedMove = null
-                lastProcessedMoveSignature = ""
                 sourceSquare = null
                 arrowOverlayView?.selectedSquare = null
                 setupBoardView?.selectedSquare = null
@@ -469,9 +484,6 @@ class ChessOverlayService : Service() {
                 setupBoardView?.invalidate()
                 arrowOverlayView?.invalidate()
                 updateMoveHistoryDisplay()
-                if (!isAutoVisionMode) {
-                    enterMappingMode()
-                }
                 calculateStockfishMoves()
                 Toast.makeText(this, "Langkah di-redo ↪️", Toast.LENGTH_SHORT).show()
             } else {
@@ -494,9 +506,6 @@ class ChessOverlayService : Service() {
 
         // Reset Board ke Posisi Standar 32 Bidak
         btnReset.setOnClickListener {
-            countdownJob?.cancel()
-            lastExecutedMove = null
-            lastProcessedMoveSignature = ""
             boardState.resetToStartingPosition()
             setupBoard.selectedSquare = null
             setupBoard.candidates = emptyList()
@@ -505,9 +514,6 @@ class ChessOverlayService : Service() {
             updateMoveHistoryDisplay()
             if (isEngineRunning) {
                 calculateStockfishMoves()
-                if (!isAutoVisionMode) {
-                    enterMappingMode()
-                }
             }
             Toast.makeText(this, "Papan catur direset ke posisi awal (32 bidak)", Toast.LENGTH_SHORT).show()
         }
@@ -627,20 +633,17 @@ class ChessOverlayService : Service() {
             setupBoard.invalidate()
 
             isEngineRunning = true
-            btnToggleEngine.text = if (isAutoVisionMode) "⏸️ STOP AUTO" else "⏸️ PAUSE"
+            btnToggleEngine.text = "⏸️ PAUSE"
             btnToggleEngine.setBackgroundColor(getColor(R.color.threat_arrow))
             calculateStockfishMoves()
-            if (isAutoVisionMode) {
-                setOverlayTouchable(false)
-                startAutoVisionLoop()
-                Toast.makeText(this, "Posisi disimpan! Mode Auto Vision aktif.", Toast.LENGTH_SHORT).show()
-            } else {
-                enterMappingMode()
-                Toast.makeText(this, "Posisi disimpan! Mode manual aktif.", Toast.LENGTH_SHORT).show()
+            if (isHoldMode) {
+                holdButtonView?.visibility = View.VISIBLE
             }
+            setArrowOverlayTouchable(false)
+            Toast.makeText(this, "Posisi disimpan!", Toast.LENGTH_SHORT).show()
         }
 
-        // Toggle Calibration Sub-panel (Titik Tracker & Penyelarasan Papan)
+        // Toggle Calibration Sub-panel (Penyelarasan Papan Catur Layar)
         btnToggleCalib.setOnClickListener {
             isCalibrationVisible = !isCalibrationVisible
             calibrationPanel.visibility = if (isCalibrationVisible) View.VISIBLE else View.GONE
@@ -651,7 +654,6 @@ class ChessOverlayService : Service() {
 
         btnUp.setOnClickListener {
             boardTopY -= 15f
-            isBoardBoundsCalibrated = true
             updateBoardBounds()
             saveCalibrationPrefs()
             arrowOverlayView?.invalidate()
@@ -659,7 +661,6 @@ class ChessOverlayService : Service() {
         }
         btnDown.setOnClickListener {
             boardTopY += 15f
-            isBoardBoundsCalibrated = true
             updateBoardBounds()
             saveCalibrationPrefs()
             arrowOverlayView?.invalidate()
@@ -667,7 +668,6 @@ class ChessOverlayService : Service() {
         }
         btnPlus.setOnClickListener {
             boardWidth += 15f
-            isBoardBoundsCalibrated = true
             updateBoardBounds()
             saveCalibrationPrefs()
             arrowOverlayView?.invalidate()
@@ -675,123 +675,24 @@ class ChessOverlayService : Service() {
         }
         btnMinus.setOnClickListener {
             boardWidth -= 15f
-            isBoardBoundsCalibrated = true
             updateBoardBounds()
             saveCalibrationPrefs()
             arrowOverlayView?.invalidate()
             calculateStockfishMoves()
         }
 
-        // Tombol Kalibrasi Sensor Teks Move History Bar
-        val btnTextUp = view.findViewById<Button>(R.id.btnTextUp)
-        val btnTextDown = view.findViewById<Button>(R.id.btnTextDown)
-        val btnTextHeightPlus = view.findViewById<Button>(R.id.btnTextHeightPlus)
-        val btnTextHeightMinus = view.findViewById<Button>(R.id.btnTextHeightMinus)
-
-        btnTextUp.setOnClickListener {
-            textSensorTopY -= 12f
-            updateTextSensorBounds()
-            saveCalibrationPrefs()
-            arrowOverlayView?.invalidate()
-        }
-        btnTextDown.setOnClickListener {
-            textSensorTopY += 12f
-            updateTextSensorBounds()
-            saveCalibrationPrefs()
-            arrowOverlayView?.invalidate()
-        }
-        btnTextHeightPlus.setOnClickListener {
-            textSensorHeight = (textSensorHeight + 10f).coerceAtMost(350f)
-            updateTextSensorBounds()
-            saveCalibrationPrefs()
-            arrowOverlayView?.invalidate()
-        }
-        btnTextHeightMinus.setOnClickListener {
-            textSensorHeight = (textSensorHeight - 10f).coerceAtLeast(30f)
-            updateTextSensorBounds()
-            saveCalibrationPrefs()
-            arrowOverlayView?.invalidate()
-        }
-
         updateMoveHistoryDisplay()
     }
 
     /**
-     * Memulai jeda waktu gerak bebas (Overlay tembus sentuh 100%).
-     * Dijalankan HANYA setelah langkah legal selesai dilakukan di mode overlay,
-     * atau saat tombol resume ditekan.
+     * Mengatur apakah Fullscreen Arrow Overlay menangkap sentuhan (true) atau tembus 100% (false)
      */
-    @SuppressLint("SetTextI18n")
-    private fun startFreeMoveDelay(seconds: Int, isResumeBuffer: Boolean = false) {
-        countdownJob?.cancel()
-        setOverlayTouchable(false) // Overlay hilang/tembus sentuh agar bebas gerak di aplikasi catur
-        isMappingModeActive = false
-
-        countdownJob = serviceScope.launch {
-            val view = panelView ?: return@launch
-            val tvEngineTitle = view.findViewById<TextView>(R.id.tvEngineTitle)
-
-            for (sec in seconds downTo 1) {
-                if (!isEngineRunning) return@launch
-                val prefix = if (isResumeBuffer) "Persiapan" else "Gerak Bidak!"
-                tvEngineTitle.text = "🎮 $prefix (${sec}s)"
-                delay(1000)
-            }
-
-            if (isEngineRunning) {
-                enterMappingMode()
-            }
-        }
-    }
-
-    /**
-     * Mengaktifkan Mode Mapping (Overlay aktif menangkap tap langkah From -> To).
-     */
-    @SuppressLint("SetTextI18n")
-    private fun enterMappingMode() {
-        if (!isEngineRunning || isAutoVisionMode) return
-        countdownJob?.cancel()
-        countdownJob = null
-
-        setOverlayTouchable(true) // Hanya aktif saat Mode Manual
-        isMappingModeActive = true
-
-        val view = panelView ?: return
-        val tvEngineTitle = view.findViewById<TextView>(R.id.tvEngineTitle)
-        val sideText = if (boardState.isWhiteToMove) "Putih" else "Hitam"
-        tvEngineTitle.text = "🖐️ Giliran $sideText: Tap Petak"
-    }
-
-    /**
-     * Menjeda game dan membebaskan layar dari semua sentuhan overlay.
-     */
-    @SuppressLint("SetTextI18n")
-    private fun pauseGameAndFreeScreen() {
-        countdownJob?.cancel()
-        countdownJob = null
-        autoVisionJob?.cancel()
-        autoVisionJob = null
-        isMappingModeActive = false
-        setOverlayTouchable(false) // Tembus sentuhan 100%
-
-        val view = panelView ?: return
-        val tvEngineTitle = view.findViewById<TextView>(R.id.tvEngineTitle)
-        tvEngineTitle.text = "Engine Dijeda (Sentuhan Bebas)"
-    }
-
-    /**
-     * Mengatur apakah Fullscreen Arrow Overlay menangkap sentuhan atau tembus
-     */
-    private fun setOverlayTouchable(touchable: Boolean) {
+    private fun setArrowOverlayTouchable(touchable: Boolean) {
         val overlay = arrowOverlayView ?: return
         val params = arrowLayoutParams ?: return
 
-        // PENTING: Dalam mode Auto Vision, fullscreen overlay WAJIB SELALU tembus sentuh 100% (FLAG_NOT_TOUCHABLE)
-        // Pengguna harus SELALU bisa menyentuh dan menggerakkan bidak di aplikasi Chess.com tanpa hambatan!
-        val effectiveTouchable = if (isAutoVisionMode) false else touchable
-
-        overlay.isInputMoveMode = effectiveTouchable
-        if (effectiveTouchable) {
+        overlay.isInputMoveMode = touchable
+        if (touchable) {
             params.flags = params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
         } else {
             params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
@@ -803,81 +704,33 @@ class ChessOverlayService : Service() {
     }
 
     /**
-     * Memulai pemantauan tangkapan layar otomatis (Screen Capture Auto Vision).
-     * Bekerja ultra-cepat pada match Bullet catur tanpa perlu menyentuh overlay!
+     * Eksekusi sentuhan petak catur (2x tap: From -> To) saat mode HOLD aktif
      */
-    private fun startAutoVisionLoop() {
-        autoVisionJob?.cancel()
-        countdownJob?.cancel()
-        setOverlayTouchable(false) // Sentuhan layar 100% tembus ke aplikasi catur
-
-        val helper = screenCaptureHelper
-        if (helper == null) {
-            Toast.makeText(this, "⚠️ Izin rekam layar belum aktif! Buka aplikasi utama dan klik tombol Izinkan.", Toast.LENGTH_LONG).show()
-            panelView?.findViewById<TextView>(R.id.tvEngineTitle)?.text = "⚠️ Izin Rekam Layar Belum Ada"
-            return
-        }
-
-        panelView?.findViewById<TextView>(R.id.tvEngineTitle)?.let {
-            val sideText = if (boardState.isWhiteToMove) "Putih" else "Hitam"
-            it.text = "⚡ Vision: Giliran $sideText"
-        }
-
-        autoVisionJob = serviceScope.launch(Dispatchers.Default) {
-            val tvDetectedOcr = panelView?.findViewById<TextView>(R.id.tvDetectedOcrText)
-            while (isActive && isEngineRunning && isAutoVisionMode) {
-                try {
-                    val bitmap = helper.captureSnapshot()
-                    if (bitmap != null) {
-                        val bounds = currentBoardBounds
-                        val sensorRect = arrowOverlayView?.textSensorBounds
-                        if (bounds != null) {
-                            val result = textMoveDetector.detectLatestMove(bitmap, bounds, boardState, sensorRect)
-
-                            withContext(Dispatchers.Main) {
-                                if (result.rawText.isNotBlank()) {
-                                    val sanInfo = if (result.latestSan != null) " [${result.latestSan}]" else ""
-                                    tvDetectedOcr?.text = "${result.rawText}$sanInfo"
-                                    tvDetectedOcr?.setTextColor(if (result.move != null) Color.parseColor("#34D399") else Color.parseColor("#F1F5F9"))
-                                } else {
-                                    tvDetectedOcr?.text = "(Sensor belum membaca teks)"
-                                    tvDetectedOcr?.setTextColor(Color.parseColor("#94A3B8"))
-                                }
-                            }
-
-                            val signature = result.moveSignature
-                            val textMove = result.move
-                            if (signature != null && signature != lastProcessedMoveSignature && textMove != null) {
-                                lastProcessedMoveSignature = signature
-                                lastExecutedMove = textMove
-                                withContext(Dispatchers.Main) {
-                                    arrowOverlayView?.activeTrackingMove = textMove
-                                    arrowOverlayView?.invalidate()
-                                    executeMove(textMove.first, textMove.second, isAutoVision = true)
-                                }
-                            }
-                        }
-                        bitmap.recycle()
-                    }
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-                delay(220) // Polling interval ~4.5 FPS (responsif, dingin & sangat hemat baterai)
+    private fun handleSquareTapped(square: Square) {
+        if (sourceSquare == null) {
+            val piece = boardState.getPiece(square)
+            if (piece != null) {
+                sourceSquare = square
+                arrowOverlayView?.selectedSquare = square
+                setupBoardView?.selectedSquare = square
+                arrowOverlayView?.invalidate()
+                setupBoardView?.invalidate()
+                vibrateDevice(15)
             }
+        } else {
+            val from = sourceSquare!!
+            val to = square
+            executeMove(from, to)
         }
     }
 
     /**
      * Mengeksekusi langkah catur legal.
-     * Jika sukses: memperbarui minimap, panah, kalkulasi Stockfish,
-     * lalu otomatis mengaktifkan jeda timer gerak bebas (atau loop Auto Vision)!
+     * Memperbarui minimap, panah, Stockfish, dan riwayat langkah.
      */
-    private fun executeMove(from: Square, to: Square, isAutoVision: Boolean = false): Boolean {
+    private fun executeMove(from: Square, to: Square): Boolean {
         var moved = boardState.makeMove(from, to)
-        if (!moved && isAutoVision) {
-            // Fallback untuk mode auto vision: jika validasi legal move standar gagal
-            // (misal game dimulai di tengah match seperti 7. Qxd4),
-            // lakukan forceMove agar papan & Stockfish tetap sinkron dan panah SELALU terupdate!
+        if (!moved) {
             moved = boardState.forceMove(from, to)
         }
 
@@ -894,22 +747,13 @@ class ChessOverlayService : Service() {
             calculateStockfishMoves()
             vibrateDevice(35)
 
-            if (isEngineRunning) {
-                if (isAutoVisionMode) {
-                    setOverlayTouchable(false)
-                    val view = panelView
-                    val tvEngineTitle = view?.findViewById<TextView>(R.id.tvEngineTitle)
-                    val sideText = if (boardState.isWhiteToMove) "Putih" else "Hitam"
-                    tvEngineTitle?.text = "⚡ Vision: Giliran $sideText"
-                } else {
-                    startFreeMoveDelay(delayDurationSeconds, isResumeBuffer = false)
-                }
+            val sideText = if (boardState.isWhiteToMove) "Putih" else "Hitam"
+            panelView?.findViewById<TextView>(R.id.tvEngineTitle)?.let {
+                it.text = "🎯 Giliran $sideText"
             }
             return true
         } else {
-            if (!isAutoVision) {
-                Toast.makeText(this, "Langkah tidak sah!", Toast.LENGTH_SHORT).show()
-            }
+            Toast.makeText(this, "Langkah tidak sah!", Toast.LENGTH_SHORT).show()
             sourceSquare = null
             arrowOverlayView?.selectedSquare = null
             setupBoardView?.selectedSquare = null
@@ -919,34 +763,16 @@ class ChessOverlayService : Service() {
         }
     }
 
-    private fun handleSquareTapped(square: Square) {
-        if (sourceSquare == null) {
-            val piece = boardState.getPiece(square)
-            if (piece != null) {
-                sourceSquare = square
-                arrowOverlayView?.selectedSquare = square
-                arrowOverlayView?.invalidate()
-            }
-        } else {
-            val from = sourceSquare!!
-            if (from == square) {
-                sourceSquare = null
-                arrowOverlayView?.selectedSquare = null
-                arrowOverlayView?.invalidate()
-                return
-            }
-            val moved = executeMove(from, square)
-            if (!moved) {
-                sourceSquare = null
-                arrowOverlayView?.selectedSquare = null
-                arrowOverlayView?.invalidate()
-            }
-        }
-    }
-
-    @SuppressLint("SetTextI18n")
     private fun calculateStockfishMoves() {
-        serviceScope.launch {
+        val fen = boardState.toFen()
+        val engine = if (::stockfishEngine.isInitialized) stockfishEngine else null
+        if (engine == null) return
+
+        serviceScope.launch(Dispatchers.Main) {
+            val analysis = withContext(Dispatchers.Default) {
+                engine.evaluatePosition(fen, moveTimeMs = 500)
+            }
+
             val view = panelView ?: return@launch
             val tvLine1 = view.findViewById<TextView>(R.id.tvLine1)
             val tvLine2 = view.findViewById<TextView>(R.id.tvLine2)
@@ -956,15 +782,13 @@ class ChessOverlayService : Service() {
             val tvLineHuman = view.findViewById<TextView>(R.id.tvLineHuman)
             val textViews = listOf(tvLine1, tvLine2, tvLine3, tvLine4, tvLine5)
 
-            val fen = boardState.toFen()
-            tvLine1?.text = "#1: Mengkalkulasi..."
-
-            val rawCandidates = stockfishEngine.analyzeFen(fen, moveTimeMs = 600)
-
-            // Format kandidat: 5 baris mesin terbaik + 1 langkah kreatif/manusiawi (Mikhail Tal style)
-            val candidates = if (rawCandidates.size >= 6) {
+            val rawCandidates = analysis.candidates
+            val candidates = if (rawCandidates.size >= 2) {
                 val top5 = rawCandidates.take(5)
-                val humanMove = rawCandidates[5].copy(isHuman = true)
+                val humanCandidate = rawCandidates.getOrNull(2)
+                val humanMove = if (humanCandidate != null) {
+                    listOf(humanCandidate.copy(rankOrder = 6, isHuman = true))
+                } else emptyList()
                 top5 + humanMove
             } else {
                 rawCandidates
@@ -990,7 +814,6 @@ class ChessOverlayService : Service() {
                     }
                 }
 
-                // Tampilkan Langkah Manusiawi / Kreatif (Rank 6 / Human) jika ada
                 val humanCandidate = candidates.firstOrNull { it.isHuman }
                 if (humanCandidate != null) {
                     val scoreText = if (humanCandidate.isMate) "M${humanCandidate.mateMoves}" else {
@@ -1015,11 +838,9 @@ class ChessOverlayService : Service() {
                 tvLineHuman?.visibility = View.GONE
             }
 
-            // Update Mini Board dengan hingga 6 panah rekomendasi (5 Top + 1 Human)
             setupBoardView?.candidates = candidates
             setupBoardView?.invalidate()
 
-            // Update Panah Fullscreen Multi-PV (hingga 6 panah arah berbeda dengan warna unik)
             currentBoardBounds?.let { bounds ->
                 arrowOverlayView?.updateAnalysis(bounds, candidates, emptyList())
             }
@@ -1055,20 +876,12 @@ class ChessOverlayService : Service() {
         createNotificationChannel()
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Chess Vision Overlay Aktif")
-            .setContentText("Auto Vision & Analisis Catur Siap")
+            .setContentText("Mode HOLD & Analisis Catur Siap")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
-        }
+        startForeground(NOTIFICATION_ID, notification)
     }
 
     private fun createNotificationChannel() {
@@ -1077,23 +890,35 @@ class ChessOverlayService : Service() {
                 CHANNEL_ID,
                 "Chess Overlay Service",
                 NotificationManager.IMPORTANCE_LOW
-            )
+            ).apply {
+                description = "Notifikasi status overlay kalkulator catur"
+            }
             val manager = getSystemService(NotificationManager::class.java)
-            manager?.createNotificationChannel(channel)
+            manager.createNotificationChannel(channel)
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        countdownJob?.cancel()
-        autoVisionJob?.cancel()
         serviceScope.cancel()
-        screenCaptureHelper?.release()
-        screenCaptureHelper = null
-        textMoveDetector.release()
-        stockfishEngine.stop()
-
-        panelView?.let { windowManager?.removeView(it) }
-        arrowOverlayView?.let { windowManager?.removeView(it) }
+        try {
+            if (holdButtonView != null) {
+                windowManager?.removeView(holdButtonView)
+                holdButtonView = null
+            }
+            if (panelView != null) {
+                windowManager?.removeView(panelView)
+                panelView = null
+            }
+            if (arrowOverlayView != null) {
+                windowManager?.removeView(arrowOverlayView)
+                arrowOverlayView = null
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        if (::stockfishEngine.isInitialized) {
+            stockfishEngine.stop()
+        }
     }
 }

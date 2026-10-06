@@ -60,6 +60,7 @@ class ChessOverlayService : Service() {
     // Mode: 1-Tap Auto-Lepas vs Jeda Timer
     private var isHoldMode = true // true = 1-Tap Auto-Lepas, false = Jeda Timer
     private var isMappingActive = false
+    private var mappingTapCount = 0
     private var isEngineRunning = false
     private var isPanelMinimized = false
     private var isCalibrationVisible = false
@@ -192,7 +193,15 @@ class ChessOverlayService : Service() {
                 handleSquareTapped(square)
             }
             arrowOverlayView?.onMoveDragged = { from: Square, to: Square ->
+                if (isMappingActive) {
+                    mappingTapCount += 2
+                    updateMappingStatusUI()
+                }
                 executeMove(from, to)
+                if (isHoldMode && isMappingActive && mappingTapCount >= 4) {
+                    disableMappingMode()
+                    Toast.makeText(this, "🎯 4x Tap selesai! Mode tembus sentuh aktif.", Toast.LENGTH_SHORT).show()
+                }
             }
 
             wm.addView(arrowOverlayView, arrowLayoutParams)
@@ -314,8 +323,21 @@ class ChessOverlayService : Service() {
         }
     }
 
+    private fun updateMappingStatusUI() {
+        val button = holdButtonView
+        val tvLabel = button?.findViewById<TextView>(R.id.tvHoldLabel)
+        val tvIcon = button?.findViewById<TextView>(R.id.tvHoldIcon)
+        if (isMappingActive) {
+            tvIcon?.text = "🖐️"
+            tvLabel?.text = "$mappingTapCount/4 TAP"
+            tvLabel?.setTextColor(Color.WHITE)
+            panelView?.findViewById<TextView>(R.id.tvEngineTitle)?.text = "🖐️ MAPPING ($mappingTapCount/4 Tap)"
+        }
+    }
+
     private fun enableMappingMode() {
         isMappingActive = true
+        mappingTapCount = 0
         vibrateDevice(25)
         val button = holdButtonView
         val container = button?.findViewById<FrameLayout>(R.id.holdButtonContainer)
@@ -324,16 +346,17 @@ class ChessOverlayService : Service() {
 
         container?.setBackgroundResource(R.drawable.bg_hold_button_active)
         tvIcon?.text = "🖐️"
-        tvLabel?.text = "AKTIF"
+        tvLabel?.text = "0/4 TAP"
         tvLabel?.setTextColor(Color.WHITE)
 
         setArrowOverlayTouchable(true)
         arrowOverlayView?.isInputMoveMode = true
-        panelView?.findViewById<TextView>(R.id.tvEngineTitle)?.text = "🖐️ MAPPING: Tap 2x di Papan!"
+        panelView?.findViewById<TextView>(R.id.tvEngineTitle)?.text = "🖐️ MAPPING (0/4): Tap Petak"
     }
 
     private fun disableMappingMode() {
         isMappingActive = false
+        mappingTapCount = 0
         val button = holdButtonView
         val container = button?.findViewById<FrameLayout>(R.id.holdButtonContainer)
         val tvIcon = button?.findViewById<TextView>(R.id.tvHoldIcon)
@@ -391,7 +414,7 @@ class ChessOverlayService : Service() {
 
         fun updateModeUI() {
             if (isHoldMode) {
-                btnToggleMode.text = "🎯 MODE: 1-TAP (AUTO-LEPAS)"
+                btnToggleMode.text = "🎯 MODE: 1-TAP (AUTO-LEPAS 4x TAP)"
                 btnToggleMode.setBackgroundColor(Color.parseColor("#059669"))
                 holdButtonView?.visibility = if (isEngineRunning) View.VISIBLE else View.GONE
                 delayContainer.visibility = View.GONE
@@ -413,7 +436,7 @@ class ChessOverlayService : Service() {
             isHoldMode = !isHoldMode
             updateModeUI()
             if (isHoldMode) {
-                Toast.makeText(this, "Mode 1-Tap: Tekan tombol 🎯 sekali, tap 2x di papan -> otomatis lepas!", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "Mode 1-Tap: Tekan tombol 🎯 sekali, tap hingga 4x di papan -> otomatis lepas!", Toast.LENGTH_LONG).show()
             } else {
                 Toast.makeText(this, "Mode Jeda Timer: Jeda ${delayDurationSeconds}s sebelum mode sentuh overlay.", Toast.LENGTH_LONG).show()
             }
@@ -823,7 +846,7 @@ class ChessOverlayService : Service() {
     }
 
     /**
-     * Eksekusi sentuhan petak catur (2x tap: From -> To)
+     * Eksekusi sentuhan petak catur (From -> To)
      */
     private fun handleSquareTapped(square: Square) {
         if (sourceSquare == null) {
@@ -835,11 +858,24 @@ class ChessOverlayService : Service() {
                 arrowOverlayView?.invalidate()
                 setupBoardView?.invalidate()
                 vibrateDevice(15)
+                if (isMappingActive) {
+                    mappingTapCount++
+                    updateMappingStatusUI()
+                }
             }
         } else {
             val from = sourceSquare!!
             val to = square
+            if (isMappingActive) {
+                mappingTapCount++
+                updateMappingStatusUI()
+            }
             executeMove(from, to)
+        }
+
+        if (isHoldMode && isMappingActive && mappingTapCount >= 4) {
+            disableMappingMode()
+            Toast.makeText(this, "🎯 4x Tap selesai! Mode tembus sentuh aktif.", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -868,8 +904,10 @@ class ChessOverlayService : Service() {
 
             if (isEngineRunning) {
                 if (isHoldMode) {
-                    // MODE 1-TAP: Otomatis LEPAS seketika agar pemain bebas gerak di Chess.com!
-                    disableMappingMode()
+                    // MODE 1-TAP: Otomatis LEPAS hanya jika sudah mencapai 4x tap
+                    if (mappingTapCount >= 4) {
+                        disableMappingMode()
+                    }
                 } else {
                     // MODE JEDA TIMER: Mulai jeda waktu bebas gerak
                     startFreeMoveDelay(delayDurationSeconds, isResumeBuffer = false)

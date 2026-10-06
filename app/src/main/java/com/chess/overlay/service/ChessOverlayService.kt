@@ -35,6 +35,7 @@ import com.chess.overlay.core.model.Square
 import com.chess.overlay.core.overlay.ArrowOverlayView
 import com.chess.overlay.core.overlay.SetupBoardView
 import com.chess.overlay.core.overlay.SetupTool
+import com.chess.overlay.core.vision.MoveHistoryTextDetector
 import com.chess.overlay.core.vision.PieceClassifier
 import com.chess.overlay.core.vision.YellowHighlightDetector
 import kotlinx.coroutines.*
@@ -68,6 +69,7 @@ class ChessOverlayService : Service() {
 
     // Auto Vision Screen Capture & Yellow Highlight Tracking
     private var screenCaptureHelper: ScreenCaptureHelper? = null
+    private val textMoveDetector = MoveHistoryTextDetector()
     private val yellowDetector = YellowHighlightDetector()
     private val pieceClassifier = PieceClassifier()
     private var isAutoVisionMode = true // Default mode auto bullet
@@ -744,22 +746,36 @@ class ChessOverlayService : Service() {
                     if (bitmap != null) {
                         val bounds = currentBoardBounds
                         if (bounds != null) {
-                            val yellowSquares = yellowDetector.detectYellowSquares(bitmap, bounds)
+                            var detectedMove: Pair<Square, Square>? = null
 
-                            // Pada Chess.com, langkah yang sudah selesai menghasilkan tepat 2 petak kuning (from & to)
-                            if (yellowSquares.size == 2) {
-                                val (from, to) = yellowDetector.detectMoveFromYellowSquares(
-                                    bitmap, bounds, yellowSquares[0], yellowSquares[1], boardState
-                                )
+                            // 1. PRIORITAS UTAMA: Baca notasi teks di Move History Bar di bawah papan via OCR
+                            val textMove = textMoveDetector.detectLatestMove(bitmap, bounds, boardState)
+                            if (textMove != null && textMove != lastExecutedMove) {
+                                detectedMove = textMove
+                            }
 
-                                val movePair = Pair(from, to)
-                                if (movePair != lastExecutedMove) {
-                                    lastExecutedMove = movePair
-                                    withContext(Dispatchers.Main) {
-                                        arrowOverlayView?.activeTrackingMove = movePair
-                                        arrowOverlayView?.invalidate()
-                                        executeMove(from, to, isAutoVision = true)
+                            // 2. FALLBACK: Jika teks belum terbaca, gunakan deteksi petak kuning
+                            if (detectedMove == null) {
+                                val yellowSquares = yellowDetector.detectYellowSquares(bitmap, bounds)
+                                if (yellowSquares.size == 2) {
+                                    val (from, to) = yellowDetector.detectMoveFromYellowSquares(
+                                        bitmap, bounds, yellowSquares[0], yellowSquares[1], boardState
+                                    )
+                                    val movePair = Pair(from, to)
+                                    if (movePair != lastExecutedMove) {
+                                        detectedMove = movePair
                                     }
+                                }
+                            }
+
+                            // Eksekusi jika ditemukan langkah baru
+                            if (detectedMove != null && detectedMove != lastExecutedMove) {
+                                val (from, to) = detectedMove
+                                lastExecutedMove = detectedMove
+                                withContext(Dispatchers.Main) {
+                                    arrowOverlayView?.activeTrackingMove = detectedMove
+                                    arrowOverlayView?.invalidate()
+                                    executeMove(from, to, isAutoVision = true)
                                 }
                             }
                         }
@@ -980,6 +996,7 @@ class ChessOverlayService : Service() {
         serviceScope.cancel()
         screenCaptureHelper?.release()
         screenCaptureHelper = null
+        textMoveDetector.release()
         stockfishEngine.stop()
 
         panelView?.let { windowManager?.removeView(it) }

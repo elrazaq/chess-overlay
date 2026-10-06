@@ -11,8 +11,8 @@ android {
         applicationId = "com.chess.overlay"
         minSdk = 26
         targetSdk = 33
-        versionCode = 24
-        versionName = "1.4.0"
+        versionCode = 25
+        versionName = "1.4.1"
 
         ndk {
             abiFilters.add("arm64-v8a")
@@ -78,4 +78,5 @@ dependencies {
     implementation("com.google.android.material:material:1.11.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    implementation("com.google.mlkit:text-recognition:16.0.0")
 }

@@ -422,6 +422,83 @@ class BoardState {
     }
 
     /**
+     * Mencari langkah legal (from, to) berdasarkan notasi catur SAN (misal "Qd4", "Ne5", "e4", "dxe4", "O-O").
+     */
+    fun findMoveForSan(sanText: String): Pair<Square, Square>? {
+        val clean = sanText.trim().replace("+", "").replace("#", "")
+        if (clean.equals("O-O", ignoreCase = true) || clean == "0-0") {
+            val rank = if (isWhiteToMove) 0 else 7
+            val from = Square(4, rank)
+            val to = Square(6, rank)
+            return if (isValidMove(from, to)) Pair(from, to) else null
+        }
+        if (clean.equals("O-O-O", ignoreCase = true) || clean == "0-0-0") {
+            val rank = if (isWhiteToMove) 0 else 7
+            val from = Square(4, rank)
+            val to = Square(2, rank)
+            return if (isValidMove(from, to)) Pair(from, to) else null
+        }
+
+        // Cari target petak [a-h][1-8]
+        val targetMatch = Regex("([a-h][1-8])", RegexOption.IGNORE_CASE).findAll(clean).lastOrNull() ?: return null
+        val targetUci = targetMatch.value.lowercase()
+        val targetSquare = Square.fromUci(targetUci)
+
+        // Tentukan hint jenis bidak (N, B, R, Q, K atau pion jika huruf kecil)
+        var pieceHint: PieceType? = null
+        var fileHint: Char? = null
+        var rankHint: Char? = null
+
+        val prefix = clean.substring(0, targetMatch.range.first)
+        for (ch in prefix) {
+            when (ch.uppercaseChar()) {
+                'N' -> pieceHint = PieceType.KNIGHT
+                'B' -> pieceHint = PieceType.BISHOP
+                'R' -> pieceHint = PieceType.ROOK
+                'Q' -> pieceHint = PieceType.QUEEN
+                'K' -> pieceHint = PieceType.KING
+                in 'a'..'h' -> fileHint = ch.lowercaseChar()
+                in '1'..'8' -> rankHint = ch
+            }
+        }
+        if (pieceHint == null && fileHint == null && (prefix.isEmpty() || prefix.contains("x", ignoreCase = true))) {
+            pieceHint = PieceType.PAWN
+        }
+
+        val candidates = mutableListOf<Square>()
+        for (r in 0..7) {
+            for (f in 0..7) {
+                val sq = Square(f, r)
+                val p = getPiece(sq) ?: continue
+                if (p.isWhite != isWhiteToMove) continue
+                if (pieceHint != null && p.type != pieceHint) continue
+                if (fileHint != null && ('a' + f) != fileHint) continue
+                if (rankHint != null && ('1' + r) != rankHint) continue
+
+                if (isValidMove(sq, targetSquare)) {
+                    candidates.add(sq)
+                }
+            }
+        }
+
+        return if (candidates.isNotEmpty()) {
+            Pair(candidates[0], targetSquare)
+        } else {
+            // Jika pieceHint tidak cocok (misal OCR salah membaca huruf Q atau hilang), cari bidak apapun yang valid
+            for (r in 0..7) {
+                for (f in 0..7) {
+                    val sq = Square(f, r)
+                    val p = getPiece(sq) ?: continue
+                    if (p.isWhite == isWhiteToMove && isValidMove(sq, targetSquare)) {
+                        return Pair(sq, targetSquare)
+                    }
+                }
+            }
+            null
+        }
+    }
+
+    /**
      * Memastikan minimal ada 1 Raja Putih & 1 Raja Hitam di papan agar FEN valid untuk Stockfish.
      */
     fun ensureKingsExist() {

@@ -831,7 +831,7 @@ class ChessOverlayService : Service() {
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }
-                delay(130) // Polling interval ~8 FPS (responsif & hemat daya)
+                delay(220) // Polling interval ~4.5 FPS (responsif, dingin & sangat hemat baterai)
             }
         }
     }

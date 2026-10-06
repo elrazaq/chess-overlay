@@ -494,18 +494,6 @@ class BoardState {
             return Pair(candidates[0], targetSquare)
         }
 
-        // Coba tanpa pieceHint jika OCR salah membaca karakter simbol
-        for (r in 0..7) {
-            for (f in 0..7) {
-                val sq = Square(f, r)
-                val p = getPiece(sq) ?: continue
-                if (p.isWhite == turn && isValidMove(sq, targetSquare, ignoreTurnCheck = true)) {
-                    if (forcedTurn != null) isWhiteToMove = forcedTurn
-                    return Pair(sq, targetSquare)
-                }
-            }
-        }
-
         // Jika tidak ditemukan pada giliran ini, coba auto-sync dengan giliran lawan (1 langkah desync)
         if (forcedTurn == null) {
             val oppositeMove = findMoveForSan(sanText, forcedTurn = !isWhiteToMove)

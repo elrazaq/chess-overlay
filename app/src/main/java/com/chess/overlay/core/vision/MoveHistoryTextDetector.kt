@@ -195,28 +195,8 @@ class MoveHistoryTextDetector {
         val latestSan = moveTokens.last()
         val signature = "${moveTokens.size}:$latestSan"
 
-        // 4. Cari langkah sah untuk token terbaru
-        var legalMove = boardState.findMoveForSan(latestSan)
-
-        // Jika tidak valid untuk giliran saat ini, coba cek dengan auto-turn sync
-        if (legalMove == null) {
-            legalMove = boardState.findMoveForSan(latestSan, forcedTurn = !boardState.isWhiteToMove)
-        }
-
-        // Jika masih null dan terdapat token sebelumnya (misal White e4 dan Black Nf6 terdeteksi berurutan)
-        if (legalMove == null && moveTokens.size >= 2) {
-            val secondLastSan = moveTokens[moveTokens.size - 2]
-            legalMove = boardState.findMoveForSan(secondLastSan)
-            if (legalMove != null) {
-                return TextDetectionResult(
-                    rawText = cleanRawText,
-                    moveTokens = moveTokens,
-                    latestSan = secondLastSan,
-                    moveSignature = "${moveTokens.size - 1}:$secondLastSan",
-                    move = legalMove
-                )
-            }
-        }
+        // 4. Cari langkah sah hanya untuk token langkah terbaru
+        val legalMove = boardState.findMoveForSan(latestSan)
 
         return TextDetectionResult(
             rawText = cleanRawText,

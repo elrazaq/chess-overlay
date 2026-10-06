@@ -906,13 +906,15 @@ class ChessOverlayService : Service() {
             val tvLineHuman = view.findViewById<TextView>(R.id.tvLineHuman)
             val textViews = listOf(tvLine1, tvLine2, tvLine3, tvLine4, tvLine5)
 
-            val candidates = if (rawCandidates.size >= 2) {
+            // Format kandidat: 5 baris mesin terbaik (#1-#5) + 1 langkah kreatif/manusiawi/aneh (#H)
+            val candidates = if (rawCandidates.size >= 6) {
                 val top5 = rawCandidates.take(5)
-                val humanCandidate = rawCandidates.getOrNull(2)
-                val humanMove = if (humanCandidate != null) {
-                    listOf(humanCandidate.copy(rankOrder = 6, isHuman = true))
-                } else emptyList()
+                val humanMove = rawCandidates[5].copy(rankOrder = 6, isHuman = true)
                 top5 + humanMove
+            } else if (rawCandidates.size in 2..5) {
+                val topMoves = rawCandidates.dropLast(1)
+                val humanMove = rawCandidates.last().copy(rankOrder = rawCandidates.size, isHuman = true)
+                topMoves + humanMove
             } else {
                 rawCandidates
             }
@@ -932,8 +934,13 @@ class ChessOverlayService : Service() {
                         val movesString = if (continuation.isNotEmpty()) "$primarySan ($continuation)" else primarySan
                         textViews[i]?.text = "#${i + 1} [$scoreText] $movesString"
                         textViews[i]?.visibility = View.VISIBLE
+                        textViews[i]?.setOnClickListener {
+                            executeMove(cand.from, cand.to)
+                            Toast.makeText(this@ChessOverlayService, "Langkah #${i + 1} ($primarySan) dijalankan", Toast.LENGTH_SHORT).show()
+                        }
                     } else {
                         textViews[i]?.visibility = View.GONE
+                        textViews[i]?.setOnClickListener(null)
                     }
                 }
 
@@ -946,10 +953,15 @@ class ChessOverlayService : Service() {
                     val primarySan = boardState.moveToSan(humanCandidate.from, humanCandidate.to)
                     val continuation = humanCandidate.pvLine.drop(1).take(3).joinToString(" ")
                     val movesString = if (continuation.isNotEmpty()) "$primarySan ($continuation)" else primarySan
-                    tvLineHuman?.text = "🎯 #H [Manusiawi/Tal] [$scoreText] $movesString"
+                    tvLineHuman?.text = "🎯 #H [Langkah Aneh/Manusiawi] [$scoreText] $movesString"
                     tvLineHuman?.visibility = View.VISIBLE
+                    tvLineHuman?.setOnClickListener {
+                        executeMove(humanCandidate.from, humanCandidate.to)
+                        Toast.makeText(this@ChessOverlayService, "Langkah Aneh/Manusiawi ($primarySan) dijalankan!", Toast.LENGTH_SHORT).show()
+                    }
                 } else {
                     tvLineHuman?.visibility = View.GONE
+                    tvLineHuman?.setOnClickListener(null)
                 }
             } else {
                 val inCheck = boardState.isKingInCheck(boardState.isWhiteToMove)
@@ -957,8 +969,10 @@ class ChessOverlayService : Service() {
                 tvLine1?.text = statusText
                 for (i in 1 until 5) {
                     textViews[i]?.visibility = View.GONE
+                    textViews[i]?.setOnClickListener(null)
                 }
                 tvLineHuman?.visibility = View.GONE
+                tvLineHuman?.setOnClickListener(null)
             }
 
             setupBoardView?.candidates = candidates

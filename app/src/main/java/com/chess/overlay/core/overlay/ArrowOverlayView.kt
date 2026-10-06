@@ -104,6 +104,12 @@ class ArrowOverlayView @JvmOverloads constructor(
         style = Paint.Style.FILL
     }
 
+    private val badgeBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 2.5f
+        color = Color.parseColor("#0F172A")
+    }
+
     private val badgeTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         textAlign = Paint.Align.CENTER
@@ -211,14 +217,14 @@ class ArrowOverlayView @JvmOverloads constructor(
                 rankColors.getOrElse(idx) { Color.CYAN }
             }
 
-            val alpha = if (cand.isHuman) 225 else rankAlphas.getOrElse(idx) { 160 }
+            val alpha = if (cand.isHuman) 235 else rankAlphas.getOrElse(idx) { 160 }
             val colorWithAlpha = (alpha shl 24) or (baseColor and 0x00FFFFFF)
 
             dynamicStrokePaint.color = colorWithAlpha
             dynamicHeadPaint.color = colorWithAlpha
 
             val shaftFactor = if (cand.isHuman) {
-                0.13f
+                0.14f
             } else when (idx) {
                 0 -> 0.20f
                 1 -> 0.16f
@@ -238,13 +244,25 @@ class ArrowOverlayView @JvmOverloads constructor(
                 shaftWidth = bounds.squareSize * shaftFactor,
                 headSize = bounds.squareSize * (shaftFactor * 2.1f)
             )
+        }
 
-            // Tampilkan nomor badge #1 - #5 atau badge "H" untuk langkah kreatif/manusiawi
-            if (displayCount > 1) {
+        // 4. Gambar semua badge (#1-#5 dan "H") pada lapisan teratas agar tidak tertutup garis panah
+        if (displayCount > 1) {
+            for (idx in (displayCount - 1) downTo 0) {
+                val cand = candidates[idx]
+                val (endX, endY) = bounds.getSquareCenterPixel(cand.to)
+
+                val baseColor = if (cand.isHuman) {
+                    Color.parseColor("#FF6D00")
+                } else {
+                    rankColors.getOrElse(idx) { Color.CYAN }
+                }
+
                 val badgeRadius = bounds.squareSize * 0.15f
                 badgeCirclePaint.color = baseColor
                 badgeTextPaint.textSize = badgeRadius * 1.3f
                 canvas.drawCircle(endX, endY, badgeRadius, badgeCirclePaint)
+                canvas.drawCircle(endX, endY, badgeRadius, badgeBorderPaint)
                 val badgeText = if (cand.isHuman) "H" else "${idx + 1}"
                 canvas.drawText(badgeText, endX, endY + badgeRadius * 0.38f, badgeTextPaint)
             }

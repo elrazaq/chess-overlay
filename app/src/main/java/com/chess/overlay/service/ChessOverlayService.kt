@@ -769,8 +769,8 @@ class ChessOverlayService : Service() {
         if (engine == null) return
 
         serviceScope.launch(Dispatchers.Main) {
-            val analysis = withContext(Dispatchers.Default) {
-                engine.evaluatePosition(fen, moveTimeMs = 500)
+            val rawCandidates = withContext(Dispatchers.Default) {
+                engine.analyzeFen(fen, moveTimeMs = 500)
             }
 
             val view = panelView ?: return@launch
@@ -782,7 +782,6 @@ class ChessOverlayService : Service() {
             val tvLineHuman = view.findViewById<TextView>(R.id.tvLineHuman)
             val textViews = listOf(tvLine1, tvLine2, tvLine3, tvLine4, tvLine5)
 
-            val rawCandidates = analysis.candidates
             val candidates = if (rawCandidates.size >= 2) {
                 val top5 = rawCandidates.take(5)
                 val humanCandidate = rawCandidates.getOrNull(2)
